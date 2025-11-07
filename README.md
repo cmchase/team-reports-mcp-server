@@ -4,12 +4,14 @@ A clean and focused Model Context Protocol (MCP) server that provides seamless i
 
 ## 🎯 Features
 
-- **11 Comprehensive Tools** for full Jira interaction
+- **12 Comprehensive Tools** for full Jira interaction
+- **Weekly Team Reports** - Automated Jira + GitHub status reports with AI summaries
 - **Natural Language Interface** - Ask AI to manage your Jira work
 - **Real-time Updates** - Get current project status and issue information
 - **Secure Authentication** - API token-based authentication
 - **Cross-platform** - Works with any MCP-compatible client
 - **Easy Setup** - Simple configuration and testing
+- **Intelligent Caching** - Avoids duplicate API calls for existing reports
 
 ## 🛠️ Available Tools
 
@@ -26,6 +28,7 @@ A clean and focused Model Context Protocol (MCP) server that provides seamless i
 | `get_issue_types` | Get available types | `get_issue_types(project_key="PROJ")` |
 | `get_my_issues` | Get assigned issues | `get_my_issues(max_results=20)` |
 | `get_project_issues` | Get project issues | `get_project_issues(project_key="PROJ")` |
+| `generate_weekly_status` | Generate weekly report | `generate_weekly_status(github_token="ghp_...")` |
 
 ## 🚀 Quick Start (5 minutes)
 
@@ -37,10 +40,33 @@ A clean and focused Model Context Protocol (MCP) server that provides seamless i
 
 ### 1. Clone and Setup
 
+#### Create Virtual Environment (Recommended)
+
+Using a virtual environment isolates dependencies and prevents conflicts:
+
 ```bash
-cd jira-mcp-server
+cd team-reports-mcp-server
+
+# Create virtual environment
+python3 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate  # On macOS/Linux
+# or
+venv\Scripts\activate     # On Windows
+
+# Install dependencies
 pip install -r requirements.txt
 ```
+
+#### Without Virtual Environment (Not Recommended)
+
+```bash
+cd team-reports-mcp-server
+pip install -r requirements.txt
+```
+
+> **Note:** If you use a virtual environment, remember to use the venv Python path in your MCP configuration (see step 4).
 
 ### 2. Configure Credentials
 
@@ -70,17 +96,38 @@ python3 test_connection.py
 #### For Cursor:
 Add to `~/.cursor/mcp.json`:
 
+**With Virtual Environment (Recommended):**
 ```json
 {
   "mcpServers": {
-    "jira": {
+    "team-reports": {
       "type": "stdio",
-      "command": "python3",
-      "args": ["/full/path/to/jira-mcp-server/server.py"],
+      "command": "/full/path/to/team-reports-mcp-server/venv/bin/python3",
+      "args": ["/full/path/to/team-reports-mcp-server/server.py"],
       "env": {
         "JIRA_SERVER": "https://your-company.atlassian.net",
         "JIRA_EMAIL": "your-email@company.com",
-        "JIRA_API_TOKEN": "your-api-token"
+        "JIRA_API_TOKEN": "your-api-token",
+        "GITHUB_TOKEN": "your-github-token"
+      }
+    }
+  }
+}
+```
+
+**Without Virtual Environment:**
+```json
+{
+  "mcpServers": {
+    "team-reports": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["/full/path/to/team-reports-mcp-server/server.py"],
+      "env": {
+        "JIRA_SERVER": "https://your-company.atlassian.net",
+        "JIRA_EMAIL": "your-email@company.com",
+        "JIRA_API_TOKEN": "your-api-token",
+        "GITHUB_TOKEN": "your-github-token"
       }
     }
   }
@@ -90,17 +137,38 @@ Add to `~/.cursor/mcp.json`:
 #### For VS Code:
 Add to your VS Code MCP configuration:
 
+**With Virtual Environment (Recommended):**
 ```json
 {
   "mcpServers": {
-    "jira": {
+    "team-reports": {
       "type": "stdio",
-      "command": "python3",
-      "args": ["/full/path/to/jira-mcp-server/server.py"],
+      "command": "/full/path/to/team-reports-mcp-server/venv/bin/python3",
+      "args": ["/full/path/to/team-reports-mcp-server/server.py"],
       "env": {
         "JIRA_SERVER": "https://your-company.atlassian.net",
         "JIRA_EMAIL": "your-email@company.com",
-        "JIRA_API_TOKEN": "your-api-token"
+        "JIRA_API_TOKEN": "your-api-token",
+        "GITHUB_TOKEN": "your-github-token"
+      }
+    }
+  }
+}
+```
+
+**Without Virtual Environment:**
+```json
+{
+  "mcpServers": {
+    "team-reports": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["/full/path/to/team-reports-mcp-server/server.py"],
+      "env": {
+        "JIRA_SERVER": "https://your-company.atlassian.net",
+        "JIRA_EMAIL": "your-email@company.com",
+        "JIRA_API_TOKEN": "your-api-token",
+        "GITHUB_TOKEN": "your-github-token"
       }
     }
   }
@@ -108,13 +176,18 @@ Add to your VS Code MCP configuration:
 ```
 
 **Important:** 
-- Use the full absolute path to `server.py`!
+- Use the full absolute path to `server.py` and Python interpreter
 - The `"type": "stdio"` field is **required** for proper MCP communication
-- If using a virtual environment, use the full path to the Python interpreter: `"/path/to/venv/bin/python3"`
+- With virtual environment: point `command` to `venv/bin/python3`
+- Without virtual environment: use system `python3`
 
 ### 5. Start the Server
 
 ```bash
+# If using virtual environment, activate it first
+source venv/bin/activate  # On macOS/Linux
+
+# Start the server
 python3 server.py
 ```
 
@@ -132,14 +205,22 @@ Restart your MCP client and try these commands:
 jira-mcp-server/
 ├── server.py              # Main MCP server implementation
 ├── test_connection.py     # Connection test script
+├── test_weekly_report.py  # Weekly report functionality tests
 ├── requirements.txt       # Python dependencies
 ├── .env                   # Environment variables (create this)
-└── README.md              # This file
+├── README.md              # This file
+├── config/                # Configuration files (optional)
+│   ├── jira_config.yaml   # Jira configuration
+│   ├── github_config.yaml # GitHub configuration
+│   └── team_config.yaml   # Team configuration
+└── Reports/               # Generated weekly reports
+    └── Weekly_Report_*.md
 ```
 
 ## 🔗 Related Projects
 
-- **[Jira Weekly Reports](https://github.com/sthirugn/jira-weekly-reports)** - Generate automated weekly team summaries from Jira tickets
+- **[Team Reports](https://github.com/cmchase/team-reports)** - Comprehensive team reporting library for Jira and GitHub (integrated in this MCP server)
+- **[Jira Weekly Reports](https://github.com/sthirugn/jira-weekly-reports)** - Original project for automated weekly team summaries from Jira tickets
 
 ## 🎯 Usage Examples
 
@@ -189,6 +270,264 @@ get_issue(issue_key="PROJ-12345")
 search_issues(jql="project = PROJ AND status = Open", max_results=10)
 ```
 
+## 📊 Weekly Team Status Reports
+
+The `generate_weekly_status` tool combines data from Jira and GitHub to create comprehensive weekly team reports with optional AI-powered executive summaries.
+
+### Features
+
+- **Intelligent Caching** - Checks for existing reports to avoid duplicate API calls
+- **Wednesday-Tuesday Weeks** - Follows standard sprint week boundaries
+- **Combined Data** - Merges Jira issue tracking with GitHub code activity
+- **AI Summaries** - Optional executive summaries with configurable prompts
+- **Hybrid Configuration** - Load from config files or pass parameters directly
+- **Auto-Save** - Reports saved to `Reports/` directory in Markdown format
+
+### Prerequisites for Weekly Reports
+
+1. **Jira credentials** (from `.env` file):
+   - `JIRA_SERVER`
+   - `JIRA_EMAIL`
+   - `JIRA_API_TOKEN`
+
+2. **GitHub token** (from `.env` file or passed as parameter):
+   - `GITHUB_TOKEN` environment variable (recommended)
+   - Or pass `github_token` parameter when calling the tool
+   - Personal Access Token with `repo` scope
+   - Generate at: https://github.com/settings/tokens
+
+3. **Configuration** (flexible, choose one approach):
+   
+   **Option A: Configuration Files** (recommended for permanent setups)
+   - Create `config/jira_config.yaml` - Jira projects, team members, filters
+   - Create `config/github_config.yaml` - GitHub repositories, team mapping
+   - Copy from `.example` files in `config/` directory
+   - See [team-reports documentation](https://github.com/cmchase/team-reports) for full config details
+   
+   **Option B: Parameter Overrides** (recommended for one-off reports)
+   - Pass `config_overrides` parameter directly
+   - No config files needed
+   - Great for testing or dynamic configurations
+
+### Basic Usage
+
+```python
+# Generate report for current week (uses current date, goes back 7 days)
+# If GITHUB_TOKEN is set in .env, no parameters needed!
+generate_weekly_status()
+
+# Or pass GitHub token explicitly
+generate_weekly_status(
+    github_token="ghp_your_github_token_here"
+)
+```
+
+### Advanced Usage
+
+```python
+# Generate report for specific week (dates must be Wednesday-Tuesday)
+generate_weekly_status(
+    github_token="ghp_your_github_token_here",
+    start_date="2024-11-13",  # Wednesday
+    end_date="2024-11-06",    # Previous Tuesday
+    regenerate=False,         # Use cached report if exists
+    generate_summary=True     # Include AI summary prompt
+)
+```
+
+### With Configuration Overrides
+
+```python
+# Option 1: Override config files with custom settings
+generate_weekly_status(
+    config_overrides={
+        "jira": {
+            "base_jql": "project IN (PROJ1, PROJ2) AND sprint = 'Sprint 42'",
+            "team_emails": ["alice@company.com", "bob@company.com"]
+        },
+        "github": {
+            "repositories": [
+                {"owner": "myorg", "repo": "backend"},
+                {"owner": "myorg", "repo": "frontend"}
+            ],
+            "team_members": ["alice-gh", "bob-gh"]
+        }
+    }
+)
+
+# Option 2: No config files, everything in parameters
+generate_weekly_status(
+    config_overrides={
+        "jira": {
+            "base_jql": "project = MYPROJ",
+            "team_emails": ["user@company.com"]
+        },
+        "github": {
+            "repositories": [{"owner": "org", "repo": "repo"}],
+            "team_members": ["username"]
+        }
+    }
+)
+```
+
+### With Custom AI Summary Prompt
+
+```python
+# Use custom prompt for AI summary generation
+generate_weekly_status(
+    github_token="ghp_your_github_token_here",
+    generate_summary=True,
+    summary_prompt="""
+    Analyze this weekly report and provide:
+    1. Top 3 achievements
+    2. Critical blockers
+    3. Recommendations for next week
+    
+    {report_content}
+    """
+)
+```
+
+### Force Regeneration
+
+```python
+# Force regeneration even if report exists
+generate_weekly_status(
+    github_token="ghp_your_github_token_here",
+    regenerate=True  # Bypass cache and regenerate
+)
+```
+
+### Report Output
+
+Reports are saved to `Reports/Weekly_Report_YYYY-MM-DD_to_YYYY-MM-DD.md` and include:
+
+1. **Jira Weekly Summary**
+   - Completed tickets by team member
+   - Story points and velocity metrics
+   - Status distribution and trends
+
+2. **GitHub Weekly Summary**
+   - Pull requests opened/merged/reviewed
+   - Commit activity by contributor
+   - Lines of code added/removed
+   - Repository activity breakdown
+
+3. **AI Summary Prompt** (if enabled)
+   - Ready-to-use prompt for executive summary
+   - Customizable focus areas
+   - Action-oriented insights
+
+### Example Workflow
+
+1. **First run** - Generates fresh report from Jira and GitHub APIs:
+```
+generate_weekly_status(github_token="ghp_...")
+→ Creates Reports/Weekly_Report_2024-11-06_to_2024-11-13.md
+```
+
+2. **Subsequent runs** - Returns cached report instantly:
+```
+generate_weekly_status(github_token="ghp_...")
+→ Found existing report (use regenerate=true to recreate)
+→ Returns cached content without API calls
+```
+
+3. **Force update** - Regenerates with fresh data:
+```
+generate_weekly_status(github_token="ghp_...", regenerate=True)
+→ Fetches latest data from APIs
+→ Overwrites existing report
+```
+
+### Configuration Setup
+
+The MCP server now supports **two flexible ways** to configure reports:
+
+#### Option 1: Config Files (Recommended for Regular Use)
+
+Example config files are provided in the `config/` directory. Copy and customize them:
+
+```bash
+# Copy example files and customize
+cd config
+cp jira_config.yaml.example jira_config.yaml
+cp github_config.yaml.example github_config.yaml
+
+# Edit the files with your team's settings
+```
+
+**`config/jira_config.yaml` (required fields):**
+```yaml
+# Base JQL query for filtering issues (REQUIRED)
+base_jql: "project = MYPROJECT"
+
+# Team member email addresses
+team_emails:
+  - member1@company.com
+  - member2@company.com
+
+# Optional: Additional filters, custom fields, etc.
+# See jira_config.yaml.example for full options
+```
+
+**`config/github_config.yaml` (required fields):**
+```yaml
+# Repositories to monitor (REQUIRED)
+repositories:
+  - owner: your-org
+    repo: your-repo-1
+  - owner: your-org
+    repo: your-repo-2
+
+# Team member GitHub usernames
+team_members:
+  - github-username-1
+  - github-username-2
+
+# Optional: Activity filters, report options, etc.
+# See github_config.yaml.example for full options
+```
+
+#### Option 2: Parameter Overrides (Great for Testing)
+
+Skip config files entirely and pass settings directly:
+
+```python
+generate_weekly_status(
+    config_overrides={
+        "jira": {
+            "base_jql": "project = MYPROJ",
+            "team_emails": ["user@company.com"]
+        },
+        "github": {
+            "repositories": [
+                {"owner": "org", "repo": "repo1"}
+            ],
+            "team_members": ["username"]
+        }
+    }
+)
+```
+
+#### Hybrid Approach (Best of Both Worlds)
+
+Config files serve as defaults, `config_overrides` modifies specific values:
+
+```python
+# Config file has full team setup
+# Override just the date range or specific filters
+generate_weekly_status(
+    config_overrides={
+        "jira": {
+            "base_jql": "project = MYPROJ AND sprint = 'Sprint 42'"
+        }
+    }
+)
+```
+
+See [team-reports CONFIGURATION_GUIDE.md](https://github.com/cmchase/team-reports/blob/main/CONFIGURATION_GUIDE.md) for complete configuration documentation.
+
 ## 🔍 JQL Query Examples
 
 ### Common Patterns
@@ -233,13 +572,21 @@ python3 test_connection.py
 ```
 ✅ Should show: "Successfully connected to Jira"
 
-### 2. Start Server (Optional Test)
+### 2. Weekly Report Functionality Test
+```bash
+python3 test_weekly_report.py
+```
+✅ Tests date calculation, configuration loading, and report caching
+✅ Validates helper functions without requiring API credentials
+✅ Shows detailed results for each test component
+
+### 3. Start Server (Optional Test)
 ```bash
 python3 server.py
 ```
 ✅ Should start the MCP server and wait for connections.
 
-### 3. Individual Tool Test
+### 4. Individual Tool Test
 ```bash
 # Test search functionality
 python3 -c "
@@ -297,14 +644,22 @@ python3 server.py
    - Run: `chmod +x server.py test_connection.py`
 
 5. **"Module not found" errors**
+   - If using virtual environment: Make sure it's activated (`source venv/bin/activate`)
    - Run: `pip install -r requirements.txt`
+   - Verify packages installed: `pip list | grep -E "mcp|jira|team-reports"`
 
-6. **Cursor doesn't see the server**
+6. **Virtual Environment Issues**
+   - If MCP can't find modules: Ensure `command` in MCP config points to `venv/bin/python3`
+   - If activation fails: Recreate venv (`rm -rf venv && python3 -m venv venv`)
+   - On Windows: Use `venv\Scripts\activate` instead of `source venv/bin/activate`
+   - Check venv is active: `which python3` should show path to venv
+
+7. **Cursor/VS Code doesn't see the server**
    - Double-check the absolute path in your MCP config
-   - Restart Cursor completely
+   - Restart MCP client completely
    - Check that the `.env` file has the correct credentials
    - **"No tools or prompts" error**: Ensure `"type": "stdio"` is included in your MCP configuration
-   - **Virtual environment**: Use the full path to your Python interpreter (e.g., `/path/to/venv/bin/python3`)
+   - **Virtual environment**: Use the full path to your Python interpreter (e.g., `/full/path/to/team-reports-mcp-server/venv/bin/python3`)
 
 ### Debug Mode
 

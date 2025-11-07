@@ -1,0 +1,44 @@
+# GitHub Configuration Example
+# Copy this file to github_config.yaml and customize for your team
+
+# GitHub repositories to monitor (required)
+repositories:
+  - owner: your-org
+    repo: your-repo-1
+  - owner: your-org
+    repo: your-repo-2
+
+# Team member GitHub usernames to include in reports
+team_members:
+  - github-username-1
+  - github-username-2
+  - github-username-3
+
+# Optional: Activity filters
+activity_filters:
+  # Include pull requests
+  include_prs: true
+  
+  # Include issues
+  include_issues: true
+  
+  # Include commits
+  include_commits: true
+  
+  # Include reviews
+  include_reviews: true
+
+# Optional: Report formatting
+report_options:
+  # Group activity by user
+  group_by_user: true
+  
+  # Include PR descriptions
+  include_pr_descriptions: false
+  
+  # Show commit details
+  show_commit_details: false
+  
+  # Sort by activity count
+  sort_by_activity: true
+

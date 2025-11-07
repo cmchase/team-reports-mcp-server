@@ -11,7 +11,11 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Optional, Sequence
+import tempfile
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+import yaml
 
 from dotenv import load_dotenv
 from jira import JIRA
@@ -30,6 +34,258 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Default AI summary prompt
+DEFAULT_SUMMARY_PROMPT = """Based on the following weekly team report, generate an executive summary highlighting:
+
+1. Key Accomplishments: Major milestones and completed work
+2. Team Velocity: Overall productivity and throughput metrics
+3. Blockers & Risks: Issues requiring attention or escalation
+4. Notable Trends: Patterns in team performance or workload
+
+Keep the summary concise (3-5 paragraphs) and action-oriented.
+
+---
+
+{report_content}
+
+---
+
+Please provide the executive summary:"""
+
+def get_week_range(start_date: Optional[str] = None, end_date: Optional[str] = None) -> Tuple[str, str]:
+    """
+    Calculate Wednesday-Tuesday week boundaries.
+    
+    Args:
+        start_date: Optional start date (YYYY-MM-DD), defaults to current date
+        end_date: Optional end date (YYYY-MM-DD), goes back 7 days if not provided
+    
+    Returns:
+        Tuple of (start_date, end_date) in ISO format (YYYY-MM-DD)
+    
+    Raises:
+        ValueError: If start_date is not Wednesday or end_date is not Tuesday
+    """
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        # Validate it's a Wednesday (weekday() returns 2 for Wednesday)
+        if start.weekday() != 2:
+            raise ValueError(f"start_date must be a Wednesday. {start_date} is a {start.strftime('%A')}")
+    else:
+        # Default to current date
+        start = datetime.now()
+    
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+        # Validate it's a Tuesday (weekday() returns 1 for Tuesday)
+        if end.weekday() != 1:
+            raise ValueError(f"end_date must be a Tuesday. {end_date} is a {end.strftime('%A')}")
+    else:
+        # Go back 7 days from start date
+        end = start - timedelta(days=7)
+    
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
+def load_config_with_overrides(config_overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Load configuration from YAML files with optional overrides.
+    
+    Args:
+        config_overrides: Optional dictionary to override config values
+    
+    Returns:
+        Dictionary containing merged configuration
+    """
+    config = {
+        'jira': {},
+        'github': {},
+        'team': {}
+    }
+    
+    # Try to load config files
+    config_dir = Path("config")
+    
+    # Load Jira config
+    jira_config_path = config_dir / "jira_config.yaml"
+    if jira_config_path.exists():
+        try:
+            with open(jira_config_path, 'r') as f:
+                config['jira'] = yaml.safe_load(f) or {}
+            logger.info(f"Loaded Jira config from {jira_config_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load Jira config: {e}")
+    
+    # Load GitHub config
+    github_config_path = config_dir / "github_config.yaml"
+    if github_config_path.exists():
+        try:
+            with open(github_config_path, 'r') as f:
+                config['github'] = yaml.safe_load(f) or {}
+            logger.info(f"Loaded GitHub config from {github_config_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load GitHub config: {e}")
+    
+    # Load team config
+    team_config_path = config_dir / "team_config.yaml"
+    if team_config_path.exists():
+        try:
+            with open(team_config_path, 'r') as f:
+                config['team'] = yaml.safe_load(f) or {}
+            logger.info(f"Loaded team config from {team_config_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load team config: {e}")
+    
+    # Apply overrides
+    if config_overrides:
+        for key, value in config_overrides.items():
+            if key in config:
+                config[key].update(value)
+            else:
+                config[key] = value
+        logger.info(f"Applied config overrides: {list(config_overrides.keys())}")
+    
+    return config
+
+
+def get_report_path(start_date: str, end_date: str) -> Path:
+    """
+    Construct the path for a weekly report file.
+    
+    Args:
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+    
+    Returns:
+        Path object for the report file
+    """
+    reports_dir = Path("Reports")
+    reports_dir.mkdir(exist_ok=True)
+    filename = f"Weekly_Report_{end_date}_to_{start_date}.md"
+    return reports_dir / filename
+
+
+def check_report_exists(start_date: str, end_date: str) -> Optional[str]:
+    """
+    Check if a report already exists for the given date range.
+    
+    Args:
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+    
+    Returns:
+        Report content if exists, None otherwise
+    """
+    report_path = get_report_path(start_date, end_date)
+    
+    if report_path.exists():
+        try:
+            with open(report_path, 'r') as f:
+                content = f.read()
+            logger.info(f"Found existing report: {report_path}")
+            return content
+        except Exception as e:
+            logger.warning(f"Failed to read existing report: {e}")
+            return None
+    
+    return None
+
+
+def save_report(content: str, start_date: str, end_date: str) -> str:
+    """
+    Save report content to disk.
+    
+    Args:
+        content: Report content to save
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+    
+    Returns:
+        Path to saved report file
+    """
+    report_path = get_report_path(start_date, end_date)
+    
+    try:
+        with open(report_path, 'w') as f:
+            f.write(content)
+        logger.info(f"Saved report to: {report_path}")
+        return str(report_path)
+    except Exception as e:
+        logger.error(f"Failed to save report: {e}")
+        raise
+
+
+def create_temp_config_file(config_dict: Dict[str, Any], prefix: str = 'mcp_config_') -> str:
+    """
+    Create a temporary YAML config file from a dictionary.
+    
+    Args:
+        config_dict: Configuration dictionary to write
+        prefix: Prefix for the temp file name
+    
+    Returns:
+        Path to the temporary config file
+    """
+    try:
+        # Create a temporary file that won't be automatically deleted
+        fd, temp_path = tempfile.mkstemp(suffix='.yaml', prefix=prefix, text=True)
+        
+        # Write the config to the file
+        with os.fdopen(fd, 'w') as f:
+            yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+        
+        logger.info(f"Created temporary config file: {temp_path}")
+        return temp_path
+    except Exception as e:
+        logger.error(f"Failed to create temp config file: {e}")
+        raise
+
+
+def merge_config_with_defaults(
+    config_overrides: Optional[Dict[str, Any]],
+    default_config_path: str,
+    config_key: str
+) -> Dict[str, Any]:
+    """
+    Merge config overrides with defaults from a config file.
+    
+    Args:
+        config_overrides: Dictionary with override values
+        default_config_path: Path to default config file
+        config_key: Key to extract from config_overrides (e.g., 'jira', 'github')
+    
+    Returns:
+        Merged configuration dictionary
+    """
+    # Start with defaults if file exists
+    config = {}
+    if os.path.exists(default_config_path):
+        try:
+            with open(default_config_path, 'r') as f:
+                config = yaml.safe_load(f) or {}
+            logger.info(f"Loaded default config from: {default_config_path}")
+        except Exception as e:
+            logger.warning(f"Could not load default config from {default_config_path}: {e}")
+    
+    # Apply overrides if provided
+    if config_overrides and config_key in config_overrides:
+        override_values = config_overrides[config_key]
+        if isinstance(override_values, dict):
+            # Deep merge - update nested values
+            def deep_update(base: dict, updates: dict) -> dict:
+                for key, value in updates.items():
+                    if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+                        base[key] = deep_update(base[key], value)
+                    else:
+                        base[key] = value
+                return base
+            
+            config = deep_update(config, override_values)
+            logger.info(f"Applied config overrides for {config_key}")
+    
+    return config
+
 
 class JiraMCPServer:
     def __init__(self):
@@ -244,6 +500,46 @@ class JiraMCPServer:
                         },
                         "required": ["project_key"]
                     }
+                ),
+                Tool(
+                    name="generate_weekly_status",
+                    description="Generate weekly team status report combining Jira and GitHub data. Checks for existing reports to avoid duplicate API calls. Optionally generates AI-powered executive summary.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "start_date": {
+                                "type": "string",
+                                "description": "Week start date (YYYY-MM-DD format, must be Wednesday). Defaults to current date."
+                            },
+                            "end_date": {
+                                "type": "string",
+                                "description": "Week end date (YYYY-MM-DD format, must be Tuesday). Defaults to 7 days before start_date."
+                            },
+                            "github_token": {
+                                "type": "string",
+                                "description": "GitHub API token for accessing repository data. If not provided, reads from GITHUB_TOKEN environment variable."
+                            },
+                            "regenerate": {
+                                "type": "boolean",
+                                "description": "Force regeneration even if report exists. Default: false",
+                                "default": False
+                            },
+                            "generate_summary": {
+                                "type": "boolean",
+                                "description": "Generate AI-powered executive summary. Default: true",
+                                "default": True
+                            },
+                            "summary_prompt": {
+                                "type": "string",
+                                "description": "Custom prompt for AI summary generation. If not provided, uses default prompt."
+                            },
+                            "config_overrides": {
+                                "type": "object",
+                                "description": "Override configuration file settings (e.g., team filters, repositories, etc.)"
+                            }
+                        },
+                        "required": []
+                    }
                 )
             ]
 
@@ -300,6 +596,16 @@ class JiraMCPServer:
                     return await self._get_project_issues(
                         arguments["project_key"],
                         arguments.get("max_results", 50)
+                    )
+                elif name == "generate_weekly_status":
+                    return await self._generate_weekly_status(
+                        arguments.get("github_token"),  # Now optional
+                        arguments.get("start_date"),
+                        arguments.get("end_date"),
+                        arguments.get("regenerate", False),
+                        arguments.get("generate_summary", True),
+                        arguments.get("summary_prompt"),
+                        arguments.get("config_overrides")
                     )
                 else:
                     return [TextContent(type="text", text=f"Unknown tool: {name}")]
@@ -627,6 +933,232 @@ class JiraMCPServer:
             
         except Exception as e:
             return [TextContent(type="text", text=f"Error fetching project issues: {str(e)}")]
+
+    async def _generate_weekly_status(
+        self,
+        github_token: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        regenerate: bool = False,
+        generate_summary: bool = True,
+        summary_prompt: Optional[str] = None,
+        config_overrides: Optional[Dict[str, Any]] = None
+    ) -> List[TextContent]:
+        """
+        Generate weekly team status report combining Jira and GitHub data.
+        
+        Args:
+            github_token: Optional GitHub API token (reads from GITHUB_TOKEN env var if not provided)
+            start_date: Optional start date (YYYY-MM-DD), defaults to current date
+            end_date: Optional end date (YYYY-MM-DD), defaults to 7 days before start
+            regenerate: Force regeneration even if report exists
+            generate_summary: Whether to generate AI summary
+            summary_prompt: Custom prompt for AI summary
+            config_overrides: Override configuration values
+        
+        Returns:
+            List of TextContent with report content and metadata
+        """
+        try:
+            # Calculate date range
+            try:
+                calc_start_date, calc_end_date = get_week_range(start_date, end_date)
+                logger.info(f"Generating report for {calc_end_date} to {calc_start_date}")
+            except ValueError as e:
+                return [TextContent(type="text", text=f"Error: {str(e)}")]
+            
+            # Check for existing report
+            if not regenerate:
+                existing_report = check_report_exists(calc_start_date, calc_end_date)
+                if existing_report:
+                    report_path = get_report_path(calc_start_date, calc_end_date)
+                    return [TextContent(
+                        type="text",
+                        text=f"**Found existing report (use regenerate=true to recreate):**\n\n"
+                             f"**File:** {report_path}\n\n"
+                             f"---\n\n{existing_report}"
+                    )]
+            
+            # Load configuration
+            config = load_config_with_overrides(config_overrides)
+            
+            # Validate required credentials
+            jira_server = os.getenv("JIRA_SERVER")
+            jira_email = os.getenv("JIRA_EMAIL")
+            jira_api_token = os.getenv("JIRA_API_TOKEN")
+            
+            # Get GitHub token from parameter or environment variable
+            if not github_token:
+                github_token = os.getenv("GITHUB_TOKEN")
+            
+            # Validate all required credentials
+            missing_creds = []
+            if not jira_server:
+                missing_creds.append("JIRA_SERVER")
+            if not jira_email:
+                missing_creds.append("JIRA_EMAIL")
+            if not jira_api_token:
+                missing_creds.append("JIRA_API_TOKEN")
+            if not github_token:
+                missing_creds.append("GITHUB_TOKEN")
+            
+            if missing_creds:
+                return [TextContent(
+                    type="text",
+                    text=f"Error: Missing required credentials: {', '.join(missing_creds)}\n\n"
+                         f"Please set these environment variables in your .env file or pass github_token as a parameter."
+                )]
+            
+            # Import team-reports library
+            try:
+                from team_reports import WeeklyJiraSummary, WeeklyGitHubSummary
+            except ImportError as e:
+                return [TextContent(
+                    type="text",
+                    text=f"Error: Failed to import team-reports library. Please ensure it's installed: {str(e)}"
+                )]
+            
+            # Prepare config files (temp or default)
+            jira_config_file = 'config/jira_config.yaml'
+            github_config_file = 'config/github_config.yaml'
+            temp_files_to_cleanup = []
+            
+            try:
+                # Create temp config files if overrides provided
+                if config_overrides:
+                    # Merge Jira config with overrides
+                    jira_config = merge_config_with_defaults(
+                        config_overrides,
+                        jira_config_file,
+                        'jira'
+                    )
+                    if jira_config:
+                        jira_config_file = create_temp_config_file(jira_config, prefix='jira_mcp_')
+                        temp_files_to_cleanup.append(jira_config_file)
+                    
+                    # Merge GitHub config with overrides
+                    github_config = merge_config_with_defaults(
+                        config_overrides,
+                        github_config_file,
+                        'github'
+                    )
+                    if github_config:
+                        github_config_file = create_temp_config_file(github_config, prefix='github_mcp_')
+                        temp_files_to_cleanup.append(github_config_file)
+                
+                # Generate Jira weekly report
+                logger.info(f"Generating Jira weekly report using config: {jira_config_file}")
+                try:
+                    jira_summary = WeeklyJiraSummary(
+                        config_file=jira_config_file,
+                        jira_server=jira_server,
+                        jira_email=jira_email,
+                        jira_token=jira_api_token
+                    )
+                    jira_report, _ = jira_summary.generate_weekly_summary(
+                        start_date=calc_start_date,
+                        end_date=calc_end_date
+                    )
+                    logger.info(f"Generated Jira report: {len(jira_report)} characters")
+                except Exception as e:
+                    logger.error(f"Failed to generate Jira report: {e}")
+                    jira_report = f"**Error generating Jira report:** {str(e)}\n\n"
+                
+                # Generate GitHub weekly report
+                logger.info(f"Generating GitHub weekly report using config: {github_config_file}")
+                try:
+                    github_summary = WeeklyGitHubSummary(
+                        config_file=github_config_file,
+                        github_token=github_token
+                    )
+                    github_report, _ = github_summary.generate_report(
+                        start_date=calc_start_date,
+                        end_date=calc_end_date,
+                        config_file=github_config_file
+                    )
+                    logger.info(f"Generated GitHub report: {len(github_report)} characters")
+                except Exception as e:
+                    logger.error(f"Failed to generate GitHub report: {e}")
+                    github_report = f"**Error generating GitHub report:** {str(e)}\n\n"
+            
+            finally:
+                # Clean up temporary config files
+                for temp_file in temp_files_to_cleanup:
+                    try:
+                        if os.path.exists(temp_file):
+                            os.unlink(temp_file)
+                            logger.info(f"Cleaned up temp config file: {temp_file}")
+                    except Exception as e:
+                        logger.warning(f"Could not delete temp file {temp_file}: {e}")
+            
+            # Combine reports
+            combined_report = f"""# Weekly Team Status Report
+## Period: {calc_end_date} to {calc_start_date}
+
+---
+
+{jira_report}
+
+---
+
+{github_report}
+
+---
+
+*Report generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}*
+"""
+            
+            # Generate AI summary if requested
+            summary_text = ""
+            if generate_summary:
+                logger.info("Generating AI summary...")
+                try:
+                    # Use custom prompt or default
+                    prompt = summary_prompt if summary_prompt else DEFAULT_SUMMARY_PROMPT
+                    prompt_with_report = prompt.format(report_content=combined_report)
+                    
+                    # Note: The AI summary will be generated by the MCP client
+                    # We append a placeholder that the client can process
+                    summary_text = f"""
+
+---
+
+## Executive Summary
+
+> **Note:** To generate an AI-powered executive summary, process the above report with the following prompt:
+
+{prompt}
+
+"""
+                    combined_report += summary_text
+                    logger.info("AI summary prompt added to report")
+                except Exception as e:
+                    logger.warning(f"Failed to add AI summary prompt: {e}")
+            
+            # Save report to disk
+            try:
+                report_path = save_report(combined_report, calc_start_date, calc_end_date)
+                logger.info(f"Report saved to: {report_path}")
+            except Exception as e:
+                logger.error(f"Failed to save report: {e}")
+                return [TextContent(
+                    type="text",
+                    text=f"Error: Failed to save report: {str(e)}\n\nReport content:\n\n{combined_report}"
+                )]
+            
+            # Return success with report content
+            return [TextContent(
+                type="text",
+                text=f"**Weekly status report generated successfully!**\n\n"
+                     f"**Period:** {calc_end_date} to {calc_start_date}\n"
+                     f"**File:** {report_path}\n"
+                     f"**Size:** {len(combined_report)} characters\n\n"
+                     f"---\n\n{combined_report}"
+            )]
+            
+        except Exception as e:
+            logger.error(f"Error generating weekly status: {e}")
+            return [TextContent(type="text", text=f"Error generating weekly status: {str(e)}")]
 
     async def run(self):
         """Run the MCP server"""

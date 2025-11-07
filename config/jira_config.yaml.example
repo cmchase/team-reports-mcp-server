@@ -1,0 +1,38 @@
+# Jira Configuration Example
+# Copy this file to jira_config.yaml and customize for your team
+
+# Base JQL query for filtering issues (required)
+base_jql: "project = MYPROJECT"
+
+# Team member email addresses to include in reports
+team_emails:
+  - member1@company.com
+  - member2@company.com
+  - member3@company.com
+
+# Optional: Additional JQL filters
+filters:
+  # Filter by specific issue types
+  issue_types:
+    - Story
+    - Bug
+    - Task
+  
+  # Filter by specific statuses
+  statuses:
+    - In Progress
+    - Done
+    - Closed
+
+# Optional: Custom field mappings
+custom_fields:
+  story_points: "customfield_10016"
+  sprint: "customfield_10020"
+
+# Optional: Report formatting
+report_options:
+  include_description: true
+  include_comments: false
+  group_by_status: true
+  sort_by_priority: true
+
