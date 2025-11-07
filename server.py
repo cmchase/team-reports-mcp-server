@@ -160,7 +160,9 @@ def get_report_path(start_date: str, end_date: str) -> Path:
     Returns:
         Path object for the report file
     """
-    reports_dir = Path("Reports")
+    # Use absolute path relative to server.py location
+    server_dir = Path(__file__).parent.absolute()
+    reports_dir = server_dir / "Reports"
     reports_dir.mkdir(exist_ok=True)
     filename = f"Weekly_Report_{end_date}_to_{start_date}.md"
     return reports_dir / filename
@@ -1019,8 +1021,10 @@ class JiraMCPServer:
                 )]
             
             # Prepare config files (temp or default)
-            jira_config_file = 'config/jira_config.yaml'
-            github_config_file = 'config/github_config.yaml'
+            # Use absolute paths to ensure they're found regardless of working directory
+            server_dir = Path(__file__).parent.absolute()
+            jira_config_file = str(server_dir / 'config' / 'jira_config.yaml')
+            github_config_file = str(server_dir / 'config' / 'github_config.yaml')
             temp_files_to_cleanup = []
             
             try:

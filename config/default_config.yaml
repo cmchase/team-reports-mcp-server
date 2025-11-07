@@ -1,0 +1,83 @@
+# Default Configuration for Team Reports
+# This file defines the baseline configuration structure and default values
+# User configs (jira_config.yaml, github_config.yaml) can override these values
+# Environment variables can override both
+
+jira:
+  base_jql: ""
+  server: ""
+
+github:
+  org: ""
+  token: ""
+
+# Feature flags for metrics (Phase 2+)
+metrics:
+  flow:
+    cycle_time: false      # Jira cycle time analysis
+    wip: false            # Jira work-in-progress tracking
+    blocked_time: false   # Jira blocked time analysis
+  delivery:
+    pr_lead_time: false   # GitHub PR lead time analysis
+    review_depth: false   # GitHub PR review analysis
+  growth:
+    enabled: false        # Growth and coaching signals
+
+# Reports feature flags
+reports:
+  engineer_performance:
+    enabled: false        # Engineer quarterly performance tracking
+
+# Configurable thresholds for analytics
+thresholds:
+  wip:
+    max_per_engineer: 3  # Default WIP limit per engineer
+  delivery:
+    min_lines_changed: 5  # Minimum lines changed to include PR in lead time analysis
+
+# Coaching thresholds for engineer performance analysis
+coaching:
+  min_prs_per_week: 1.0          # Minimum PRs per week to avoid productivity concerns
+  max_wip_threshold: 3           # Maximum WIP tickets before flagging workload issues
+  min_review_participation: 0.5  # Minimum ratio of reviews given vs received
+  productivity_concern_weeks: 3   # Number of consecutive low weeks before flagging
+
+# State mappings for different systems  
+states:
+  active: ["In Progress", "Review"]  # States considered as active WIP
+
+# Bot accounts to filter out from reports
+bots:
+  patterns:
+    - ".*bot.*"      # Any username containing "bot"
+    - "konflux-.*"   # Konflux automation accounts
+    - "sourcery-ai.*" # Sourcery AI bot
+    - "dependabot"   # Dependabot automation
+    - "renovate"     # Renovate bot
+    - "github-actions" # GitHub Actions bot
+
+# Report generation settings
+report:
+  show_active_config: true
+  enable_categorization: false  # Set to false for consolidated view
+  max_results: 200
+  order_by: "updated DESC"
+  
+# Team structure (will be populated from user configs)
+team_categories: {}
+team_members: {}
+
+# Cross-system user mapping for engineer performance reports
+# Maps GitHub usernames to Jira email addresses to unify data
+user_mapping:
+  github_to_jira: {}  # {"github_username": "jira_email@company.com"}
+  # Example:
+  # github_to_jira:
+  #   "johndoe": "john.doe@company.com"
+
+# Status filters for different report types  
+status_filters:
+  planned: ["New", "Refinement", "To Do"]
+  execution: ["In Progress", "Review"]
+  completed: ["Closed", "Done"] 
+  all: ["New", "Refinement", "To Do", "In Progress", "Review", "Closed", "Done"]
