@@ -164,7 +164,7 @@ def get_report_path(start_date: str, end_date: str) -> Path:
     server_dir = Path(__file__).parent.absolute()
     reports_dir = server_dir / "Reports"
     reports_dir.mkdir(exist_ok=True)
-    filename = f"Weekly_Report_{end_date}_to_{start_date}.md"
+    filename = f"Weekly_Report_{start_date}_to_{end_date}.md"
     return reports_dir / filename
 
 
@@ -1097,7 +1097,7 @@ class JiraMCPServer:
             
             # Combine reports
             combined_report = f"""# Weekly Team Status Report
-## Period: {calc_end_date} to {calc_start_date}
+## Period: {calc_start_date} to {calc_end_date}
 
 ---
 
@@ -1154,7 +1154,7 @@ class JiraMCPServer:
             return [TextContent(
                 type="text",
                 text=f"**Weekly status report generated successfully!**\n\n"
-                     f"**Period:** {calc_end_date} to {calc_start_date}\n"
+                     f"**Period:** {calc_start_date} to {calc_end_date}\n"
                      f"**File:** {report_path}\n"
                      f"**Size:** {len(combined_report)} characters\n\n"
                      f"---\n\n{combined_report}"
