@@ -82,8 +82,8 @@ def get_week_range(start_date: Optional[str] = None, end_date: Optional[str] = N
         if end.weekday() != 1:
             raise ValueError(f"end_date must be a Tuesday. {end_date} is a {end.strftime('%A')}")
     else:
-        # Go back 7 days from start date
-        end = start - timedelta(days=7)
+        # Calculate end date as 6 days forward from start (Wednesday + 6 days = Tuesday)
+        end = start + timedelta(days=6)
     
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
