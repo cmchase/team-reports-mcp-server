@@ -1125,7 +1125,7 @@ class JiraMCPServer:
                 
                 # Request Cursor to generate summary via MCP sampling
                 logger.info("Getting request context and session...")
-                request_ctx = self.server.request_context()
+                request_ctx = self.server.request_context  # Property, not a method
                 session = request_ctx.session
                 
                 logger.info("Calling session.create_message...")
