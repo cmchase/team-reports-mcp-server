@@ -1115,12 +1115,16 @@ class JiraMCPServer:
             # Generate AI summary using MCP sampling (always enabled)
             summary_text = ""
             logger.info("Generating AI executive summary via MCP sampling...")
+            summary_error_msg = None
             try:
                 # Use custom prompt or default
                 prompt = summary_prompt if summary_prompt else DEFAULT_SUMMARY_PROMPT
                 prompt_with_report = prompt.format(report_content=combined_report)
                 
+                logger.info(f"Prompt length: {len(prompt_with_report)} characters")
+                
                 # Request Cursor to generate summary via MCP sampling
+                logger.info("Calling server.request_sampling...")
                 sampling_result = await self.server.request_sampling(
                     CreateMessageRequest(
                         messages=[
@@ -1135,10 +1139,16 @@ class JiraMCPServer:
                     )
                 )
                 
+                logger.info(f"Sampling result received: {type(sampling_result)}")
+                logger.info(f"Sampling result content: {sampling_result.content if hasattr(sampling_result, 'content') else 'NO CONTENT ATTR'}")
+                
                 # Extract summary from response
                 summary_content = sampling_result.content
                 if hasattr(summary_content, 'text'):
                     summary_content = summary_content.text
+                    logger.info(f"Extracted text content: {len(summary_content)} characters")
+                else:
+                    logger.info(f"Content type: {type(summary_content)}, value: {summary_content}")
                 
                 # Append to report
                 summary_text = f"""
@@ -1155,7 +1165,9 @@ class JiraMCPServer:
                 logger.info("AI executive summary generated and appended")
                 
             except Exception as e:
-                logger.warning(f"Failed to generate AI summary via sampling: {e}")
+                summary_error_msg = f"Failed to generate AI summary: {type(e).__name__}: {str(e)}"
+                logger.error(summary_error_msg)
+                logger.error(f"Full traceback: ", exc_info=True)
                 # Continue without summary - don't fail the entire report
             
             # Save report to disk
@@ -1170,14 +1182,18 @@ class JiraMCPServer:
                 )]
             
             # Return success with report content
-            return [TextContent(
-                type="text",
-                text=f"**Weekly status report generated successfully!**\n\n"
-                     f"**Period:** {calc_start_date} to {calc_end_date}\n"
-                     f"**File:** {report_path}\n"
-                     f"**Size:** {len(combined_report)} characters\n\n"
-                     f"---\n\n{combined_report}"
-            )]
+            success_msg = f"**Weekly status report generated successfully!**\n\n"
+            success_msg += f"**Period:** {calc_start_date} to {calc_end_date}\n"
+            success_msg += f"**File:** {report_path}\n"
+            success_msg += f"**Size:** {len(combined_report)} characters\n"
+            
+            # Add warning if summary generation failed
+            if summary_error_msg:
+                success_msg += f"\n⚠️ **Note:** {summary_error_msg}\n"
+            
+            success_msg += f"\n---\n\n{combined_report}"
+            
+            return [TextContent(type="text", text=success_msg)]
             
         except Exception as e:
             logger.error(f"Error generating weekly status: {e}")
