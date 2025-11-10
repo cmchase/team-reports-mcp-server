@@ -1124,31 +1124,30 @@ class JiraMCPServer:
                 logger.info(f"Prompt length: {len(prompt_with_report)} characters")
                 
                 # Request Cursor to generate summary via MCP sampling
-                logger.info("Calling server.request_sampling...")
-                sampling_result = await self.server.request_sampling(
-                    CreateMessageRequest(
-                        messages=[
-                            SamplingMessage(
-                                role="user",
-                                content=prompt_with_report
-                            )
-                        ],
-                        maxTokens=2000,
-                        systemPrompt="You are a technical executive summary writer. Generate concise, actionable summaries.",
-                        includeContext="thisServer"
-                    )
+                logger.info("Getting request context and session...")
+                request_ctx = self.server.request_context()
+                session = request_ctx.session
+                
+                logger.info("Calling session.create_message...")
+                sampling_result = await session.create_message(
+                    messages=[
+                        SamplingMessage(
+                            role="user",
+                            content=TextContent(type="text", text=prompt_with_report)
+                        )
+                    ],
+                    max_tokens=2000,
+                    system_prompt="You are a technical executive summary writer. Generate concise, actionable summaries.",
+                    include_context="thisServer"
                 )
                 
                 logger.info(f"Sampling result received: {type(sampling_result)}")
-                logger.info(f"Sampling result content: {sampling_result.content if hasattr(sampling_result, 'content') else 'NO CONTENT ATTR'}")
+                logger.info(f"Sampling result: role={sampling_result.role}, model={sampling_result.model}, stopReason={sampling_result.stopReason}")
                 
-                # Extract summary from response
-                summary_content = sampling_result.content
-                if hasattr(summary_content, 'text'):
-                    summary_content = summary_content.text
-                    logger.info(f"Extracted text content: {len(summary_content)} characters")
-                else:
-                    logger.info(f"Content type: {type(summary_content)}, value: {summary_content}")
+                # Extract summary text from response
+                # The result.content is a TextContent object with a 'text' attribute
+                summary_content = sampling_result.content.text
+                logger.info(f"Extracted summary text: {len(summary_content)} characters")
                 
                 # Append to report
                 summary_text = f"""
