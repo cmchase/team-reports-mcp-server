@@ -330,8 +330,7 @@ generate_weekly_status(
     github_token="ghp_your_github_token_here",
     start_date="2024-11-13",  # Wednesday
     end_date="2024-11-06",    # Previous Tuesday
-    regenerate=False,         # Use cached report if exists
-    generate_summary=True     # Include AI summary prompt
+    regenerate=False          # Use cached report if exists
 )
 ```
 
@@ -370,23 +369,24 @@ generate_weekly_status(
 )
 ```
 
-### With Custom AI Summary Prompt
+### Get an Executive Summary
 
-```python
-# Customize the AI summary focus (summaries are always generated)
-generate_weekly_status(
-    summary_prompt="""
-    Analyze this weekly report and provide:
-    1. Top 3 achievements
-    2. Critical blockers
-    3. Recommendations for next week
-    
-    {report_content}
-    """
-)
+After generating a report, ask Cursor to create a summary:
+
+```
+"Summarize the weekly report I just generated, focusing on:
+1. Key accomplishments
+2. Critical blockers
+3. Team velocity and trends"
 ```
 
-**Note:** Executive summaries are automatically generated for every report using Cursor's built-in LLM. No additional API keys needed!
+Or simply:
+
+```
+"Give me an executive summary of this report"
+```
+
+Cursor will analyze the full report content and provide a concise overview tailored to your needs.
 
 ### Force Regeneration
 
@@ -403,21 +403,17 @@ generate_weekly_status(
 Reports are saved to `Reports/Weekly_Report_YYYY-MM-DD_to_YYYY-MM-DD.md` and include:
 
 1. **Jira Weekly Summary**
-   - Completed tickets by team member with descriptions
+   - Completed tickets by team member with descriptions (truncated to 500 chars)
    - Story points and velocity metrics
    - Status distribution and trends
 
 2. **GitHub Weekly Summary**
-   - Pull requests opened/merged/reviewed with descriptions
+   - Pull requests opened/merged/reviewed with descriptions (truncated to 500 chars)
    - Commit activity by contributor
    - Lines of code added/removed
    - Repository activity breakdown
 
-3. **Executive Summary** (automatically generated)
-   - AI-generated summary using Cursor's LLM via MCP sampling
-   - Key accomplishments, team velocity, blockers, and trends
-   - Appended to the saved report file
-   - Customizable via `summary_prompt` parameter
+**💡 Tip:** After generating a report, ask Cursor to create an executive summary tailored to your needs!
 
 ### Example Workflow
 

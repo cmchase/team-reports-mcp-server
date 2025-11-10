@@ -26,8 +26,6 @@ from mcp.types import (
     TextContent,
     Tool,
     ServerCapabilities,
-    CreateMessageRequest,
-    SamplingMessage,
 )
 
 # Load environment variables
@@ -36,22 +34,6 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Default AI summary prompt
-DEFAULT_SUMMARY_PROMPT = """Based on the preceding weekly team report (Jira and GitHub), generate an executive summary highlighting:
-
-1. Key Accomplishments: Major milestones and completed work
-2. Blockers & Risks: Issues requiring attention or escalation
-
-Keep the summary concise (3-5 bullet points) and action-oriented with a focus on outcomes.
-
----
-
-{report_content}
-
----
-
-Please provide the executive summary:"""
 
 def get_week_range(start_date: Optional[str] = None, end_date: Optional[str] = None) -> Tuple[str, str]:
     """
@@ -505,7 +487,7 @@ class JiraMCPServer:
                 ),
                 Tool(
                     name="generate_weekly_status",
-                    description="Generate weekly team status report combining Jira and GitHub data. Checks for existing reports to avoid duplicate API calls. Automatically generates AI-powered executive summary using Cursor's LLM.",
+                    description="Generate weekly team status report combining Jira and GitHub data. Checks for existing reports to avoid duplicate API calls. After generating, ask Cursor to summarize the report for an executive overview.",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -525,15 +507,6 @@ class JiraMCPServer:
                                 "type": "boolean",
                                 "description": "Force regeneration even if report exists. Default: false",
                                 "default": False
-                            },
-                            "generate_summary": {
-                                "type": "boolean",
-                                "description": "Generate AI-powered executive summary (always enabled, kept for backwards compatibility). Default: true",
-                                "default": True
-                            },
-                            "summary_prompt": {
-                                "type": "string",
-                                "description": "Custom prompt for AI summary generation. If not provided, uses default prompt."
                             },
                             "config_overrides": {
                                 "type": "object",
@@ -605,8 +578,6 @@ class JiraMCPServer:
                         arguments.get("start_date"),
                         arguments.get("end_date"),
                         arguments.get("regenerate", False),
-                        arguments.get("generate_summary", True),
-                        arguments.get("summary_prompt"),
                         arguments.get("config_overrides")
                     )
                 else:
@@ -942,8 +913,6 @@ class JiraMCPServer:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         regenerate: bool = False,
-        generate_summary: bool = True,
-        summary_prompt: Optional[str] = None,
         config_overrides: Optional[Dict[str, Any]] = None
     ) -> List[TextContent]:
         """
@@ -954,8 +923,6 @@ class JiraMCPServer:
             start_date: Optional start date (YYYY-MM-DD), defaults to current date
             end_date: Optional end date (YYYY-MM-DD), defaults to 7 days before start
             regenerate: Force regeneration even if report exists
-            generate_summary: Whether to generate AI summary
-            summary_prompt: Custom prompt for AI summary
             config_overrides: Override configuration values
         
         Returns:
@@ -1112,63 +1079,6 @@ class JiraMCPServer:
 *Report generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}*
 """
             
-            # Generate AI summary using MCP sampling (always enabled)
-            summary_text = ""
-            logger.info("Generating AI executive summary via MCP sampling...")
-            summary_error_msg = None
-            try:
-                # Use custom prompt or default
-                prompt = summary_prompt if summary_prompt else DEFAULT_SUMMARY_PROMPT
-                prompt_with_report = prompt.format(report_content=combined_report)
-                
-                logger.info(f"Prompt length: {len(prompt_with_report)} characters")
-                
-                # Request Cursor to generate summary via MCP sampling
-                logger.info("Getting request context and session...")
-                request_ctx = self.server.request_context  # Property, not a method
-                session = request_ctx.session
-                
-                logger.info("Calling session.create_message...")
-                sampling_result = await session.create_message(
-                    messages=[
-                        SamplingMessage(
-                            role="user",
-                            content=TextContent(type="text", text=prompt_with_report)
-                        )
-                    ],
-                    max_tokens=2000,
-                    system_prompt="You are a technical executive summary writer. Generate concise, actionable summaries.",
-                    include_context="thisServer"
-                )
-                
-                logger.info(f"Sampling result received: {type(sampling_result)}")
-                logger.info(f"Sampling result: role={sampling_result.role}, model={sampling_result.model}, stopReason={sampling_result.stopReason}")
-                
-                # Extract summary text from response
-                # The result.content is a TextContent object with a 'text' attribute
-                summary_content = sampling_result.content.text
-                logger.info(f"Extracted summary text: {len(summary_content)} characters")
-                
-                # Append to report
-                summary_text = f"""
-
----
-
-## 🎯 Executive Summary
-
-{summary_content}
-
----
-"""
-                combined_report += summary_text
-                logger.info("AI executive summary generated and appended")
-                
-            except Exception as e:
-                summary_error_msg = f"Failed to generate AI summary: {type(e).__name__}: {str(e)}"
-                logger.error(summary_error_msg)
-                logger.error(f"Full traceback: ", exc_info=True)
-                # Continue without summary - don't fail the entire report
-            
             # Save report to disk
             try:
                 report_path = save_report(combined_report, calc_start_date, calc_end_date)
@@ -1184,12 +1094,8 @@ class JiraMCPServer:
             success_msg = f"**Weekly status report generated successfully!**\n\n"
             success_msg += f"**Period:** {calc_start_date} to {calc_end_date}\n"
             success_msg += f"**File:** {report_path}\n"
-            success_msg += f"**Size:** {len(combined_report)} characters\n"
-            
-            # Add warning if summary generation failed
-            if summary_error_msg:
-                success_msg += f"\n⚠️ **Note:** {summary_error_msg}\n"
-            
+            success_msg += f"**Size:** {len(combined_report)} characters\n\n"
+            success_msg += f"💡 **Tip:** Ask Cursor to summarize this report for an executive overview.\n"
             success_msg += f"\n---\n\n{combined_report}"
             
             return [TextContent(type="text", text=success_msg)]
@@ -1208,8 +1114,7 @@ class JiraMCPServer:
                     server_name="jira-mcp-server",
                     server_version="1.0.0",
                     capabilities=ServerCapabilities(
-                        tools={},
-                        sampling={}
+                        tools={}
                     ),
                 ),
             )

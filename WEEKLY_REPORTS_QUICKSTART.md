@@ -300,15 +300,18 @@ Your report will include:
 - ✅ Ticket categories and priorities
 
 ### GitHub Section
-- ✅ Pull requests (opened, merged, reviewed)
+- ✅ Pull requests (opened, merged, reviewed) with descriptions
 - ✅ Commit activity by contributor
 - ✅ Lines of code changed
 - ✅ Repository breakdown
 
-### AI Summary Section (Optional)
-- ✅ Ready-to-use prompt for executive summary
-- ✅ Focuses on accomplishments, velocity, blockers, trends
-- ✅ Customizable with your own prompt
+### Getting Executive Summaries
+After generating a report, simply ask Cursor:
+- ✅ "Summarize this report"
+- ✅ "What are the key takeaways?"
+- ✅ "Give me an executive overview"
+
+Cursor will analyze the full report and provide a tailored summary!
 
 ## Common Issues
 
@@ -400,7 +403,7 @@ generate_weekly_status(regenerate=True)
 1. ✅ Generate your first report
 2. ✅ Review the output in `Reports/` directory
 3. ✅ Customize config files for your team
-4. ✅ Experiment with AI summary prompts
+4. ✅ Ask Cursor for executive summaries
 5. ✅ Integrate into your weekly team process
 
 ## Getting Help
