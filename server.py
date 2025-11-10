@@ -1126,10 +1126,7 @@ class JiraMCPServer:
                         messages=[
                             SamplingMessage(
                                 role="user",
-                                content=TextContent(
-                                    type="text",
-                                    text=prompt_with_report
-                                )
+                                content=prompt_with_report
                             )
                         ],
                         maxTokens=2000,
@@ -1139,7 +1136,9 @@ class JiraMCPServer:
                 )
                 
                 # Extract summary from response
-                summary_content = sampling_result.content.text
+                summary_content = sampling_result.content
+                if hasattr(summary_content, 'text'):
+                    summary_content = summary_content.text
                 
                 # Append to report
                 summary_text = f"""
