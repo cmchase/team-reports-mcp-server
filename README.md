@@ -5,7 +5,7 @@ A clean and focused Model Context Protocol (MCP) server that provides seamless i
 ## 🎯 Features
 
 - **12 Comprehensive Tools** for full Jira interaction
-- **Weekly Team Reports** - Automated Jira + GitHub status reports with AI summaries
+- **Weekly Team Reports** - Automated Jira + GitHub status reports with auto-generated AI executive summaries
 - **Natural Language Interface** - Ask AI to manage your Jira work
 - **Real-time Updates** - Get current project status and issue information
 - **Secure Authentication** - API token-based authentication
@@ -272,14 +272,14 @@ search_issues(jql="project = PROJ AND status = Open", max_results=10)
 
 ## 📊 Weekly Team Status Reports
 
-The `generate_weekly_status` tool combines data from Jira and GitHub to create comprehensive weekly team reports with optional AI-powered executive summaries.
+The `generate_weekly_status` tool combines data from Jira and GitHub to create comprehensive weekly team reports with automatically generated AI-powered executive summaries.
 
 ### Features
 
 - **Intelligent Caching** - Checks for existing reports to avoid duplicate API calls
 - **Wednesday-Tuesday Weeks** - Follows standard sprint week boundaries
 - **Combined Data** - Merges Jira issue tracking with GitHub code activity
-- **AI Summaries** - Optional executive summaries with configurable prompts
+- **AI Summaries** - Automatically generated executive summaries using Cursor's LLM (no additional API keys needed)
 - **Hybrid Configuration** - Load from config files or pass parameters directly
 - **Auto-Save** - Reports saved to `Reports/` directory in Markdown format
 
@@ -373,10 +373,8 @@ generate_weekly_status(
 ### With Custom AI Summary Prompt
 
 ```python
-# Use custom prompt for AI summary generation
+# Customize the AI summary focus (summaries are always generated)
 generate_weekly_status(
-    github_token="ghp_your_github_token_here",
-    generate_summary=True,
     summary_prompt="""
     Analyze this weekly report and provide:
     1. Top 3 achievements
@@ -387,6 +385,8 @@ generate_weekly_status(
     """
 )
 ```
+
+**Note:** Executive summaries are automatically generated for every report using Cursor's built-in LLM. No additional API keys needed!
 
 ### Force Regeneration
 
@@ -403,20 +403,21 @@ generate_weekly_status(
 Reports are saved to `Reports/Weekly_Report_YYYY-MM-DD_to_YYYY-MM-DD.md` and include:
 
 1. **Jira Weekly Summary**
-   - Completed tickets by team member
+   - Completed tickets by team member with descriptions
    - Story points and velocity metrics
    - Status distribution and trends
 
 2. **GitHub Weekly Summary**
-   - Pull requests opened/merged/reviewed
+   - Pull requests opened/merged/reviewed with descriptions
    - Commit activity by contributor
    - Lines of code added/removed
    - Repository activity breakdown
 
-3. **AI Summary Prompt** (if enabled)
-   - Ready-to-use prompt for executive summary
-   - Customizable focus areas
-   - Action-oriented insights
+3. **Executive Summary** (automatically generated)
+   - AI-generated summary using Cursor's LLM via MCP sampling
+   - Key accomplishments, team velocity, blockers, and trends
+   - Appended to the saved report file
+   - Customizable via `summary_prompt` parameter
 
 ### Example Workflow
 
