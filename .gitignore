@@ -74,5 +74,9 @@ logs/
 # Generated reports
 Reports/
 
-# Team-specific executive summary prompt (keep private)
+# Team-specific configuration files (keep private)
+# Public templates with .example extension are okay to commit
 config/executive_summary_prompt.txt
+config/jira_config.yaml
+config/github_config.yaml
+config/team_config.yaml
