@@ -35,6 +35,89 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Executive Summary Prompt for Discovery Team Weekly Reports
+EXECUTIVE_SUMMARY_PROMPT = """
+---
+
+### **Prompt: Weekly Discovery Team Status Report Generator**
+
+You are generating a **weekly status update** for the **Discovery Team** at Red Hat. Your output must be concise, professional, and aligned with the tone and structure of prior Discovery updates.
+
+---
+
+#### **Inputs Provided:**
+
+1. **Combined reports from two sources:**
+   * Jira weekly summary
+   * GitHub weekly summary
+     These contain tickets, PRs, commits, and assignee data for the week.
+
+2. **Optional context updates** from the user, such as:
+   * Release notes
+   * Customer or partner engagement (e.g., new spike tickets)
+   * Major team milestones or blockers
+
+---
+
+#### **Your Task:**
+
+Create a **Discovery Team – Weekly Update** using **no more than five bullet points**, written in a clear, leadership-ready tone that blends **technical accuracy** with **organizational context**.
+
+---
+
+#### **Formatting Requirements:**
+
+**Header:**
+
+```
+**Discovery Team – Weekly Update (MMM D – D, YYYY)**
+```
+
+**Body:**
+
+* Each line begins with a bolded short title describing the achievement or focus area.
+* Include relevant Jira or GitHub links inline (e.g., `[DISCOVERY-988](https://issues.redhat.com/browse/DISCOVERY-988)`, `[PR #3041](https://github.com/quipucords/quipucords/pull/3041)`).
+* Each item should be one to two sentences max, emphasizing business or user impact first, then technical detail.
+* Avoid emojis, filler phrases, or overly casual language.
+* Ensure consistent bullet formatting using hyphens (`-`), not asterisks.
+
+---
+
+#### **Tone and Style Guidelines:**
+
+* Professional and confident, but not corporate or stiff.
+* Prioritize clarity and readability over exhaustive detail.
+* Emphasize **value**, **progress**, and **collaboration**.
+* Reference releases, integrations, or partner engagements as forward momentum.
+* Maintain consistency with past Discovery updates — crisp, informative, balanced between engineering and leadership audiences.
+
+---
+
+#### **Example Output:**
+
+```
+**Discovery Team – Weekly Update (Nov 5 – 11, 2025)**  
+
+- **Engaged with a major enterprise partner (T-Mobile):** Initiated a spike to evaluate HashiCorp Vault integration for retrieving OpenShift and Ansible credentials ([DISCOVERY-XXXX](https://issues.redhat.com/browse/DISCOVERY-XXXX)). This engagement represents a major opportunity to expand Discovery's applicability in complex hybrid environments.  
+- **IPv6 support implemented:** Discovery now captures IPv6 addresses in reports ([DISCOVERY-1092](https://issues.redhat.com/browse/DISCOVERY-1092)) with corresponding updates in Camayoc ([PR #605](https://github.com/quipucords/camayoc/pull/605)).  
+- **Lightspeed report enhancement:** Added automatic inclusion of Lightspeed reports in standard Discovery archives ([PR #3041](https://github.com/quipucords/quipucords/pull/3041)).  
+- **CI modernization:** Enabled automated CI testing for `quipucordsctl` deployments ([DISCOVERY-988](https://issues.redhat.com/browse/DISCOVERY-988)), ensuring regression coverage and continued parity with the legacy installer.  
+- **Localization and logging improvements:** Refined UI string consistency ([DISCOVERY-720](https://issues.redhat.com/browse/DISCOVERY-720)) and simplified logging configuration ([PR #3042](https://github.com/quipucords/quipucords/pull/3042)) to improve maintainability.  
+```
+
+---
+
+#### **Additional Instructions:**
+
+If additional context is provided (e.g., release notes or partner engagements):
+
+* Integrate them into the top 1–2 bullets, emphasizing milestone value (e.g., "Discovery 2.3 released…" or "Engaged with a major partner…").
+* Always preserve a maximum of **five total bullets**; merge smaller related updates into single, well-structured items.
+* Ensure every update links to at least one relevant ticket or PR when possible.
+
+---
+"""
+
 def get_week_range(start_date: Optional[str] = None, end_date: Optional[str] = None) -> Tuple[str, str]:
     """
     Calculate Wednesday-Tuesday week boundaries.
@@ -487,7 +570,7 @@ class JiraMCPServer:
                 ),
                 Tool(
                     name="generate_weekly_status",
-                    description="Generate weekly team status report combining Jira and GitHub data. Checks for existing reports to avoid duplicate API calls. After generating, ask Cursor to summarize the report for an executive overview.",
+                    description="Generate weekly Discovery Team status report combining Jira and GitHub data. Checks for existing reports to avoid duplicate API calls. After generating, a detailed prompt will be provided with specific instructions for creating a concise, leadership-ready executive summary in the Discovery Team's established style.",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -1095,7 +1178,7 @@ class JiraMCPServer:
             success_msg += f"**Period:** {calc_start_date} to {calc_end_date}\n"
             success_msg += f"**File:** {report_path}\n"
             success_msg += f"**Size:** {len(combined_report)} characters\n\n"
-            success_msg += f"💡 **Tip:** Ask Cursor to summarize this report for an executive overview.\n"
+            success_msg += EXECUTIVE_SUMMARY_PROMPT
             success_msg += f"\n---\n\n{combined_report}"
             
             return [TextContent(type="text", text=success_msg)]
