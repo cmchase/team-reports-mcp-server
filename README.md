@@ -1,4 +1,4 @@
-# Jira MCP Server
+# Team Reports & Jira MCP Server
 
 A clean and focused Model Context Protocol (MCP) server that provides seamless integration between AI assistants and Jira, enabling natural language interaction with your Jira projects, issues, and workflows.
 
