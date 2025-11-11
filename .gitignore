@@ -73,3 +73,6 @@ logs/
  
 # Generated reports
 Reports/
+
+# Team-specific executive summary prompt (keep private)
+config/executive_summary_prompt.txt

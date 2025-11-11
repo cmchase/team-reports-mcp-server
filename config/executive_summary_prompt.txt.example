@@ -1,0 +1,80 @@
+---
+
+### **Prompt: Weekly Team Status Report Generator**
+
+You are generating a **weekly status update** for your team. Your output must be concise, professional, and aligned with leadership communication standards.
+
+---
+
+#### **Inputs Provided:**
+
+1. **Combined reports from two sources:**
+   * Jira weekly summary
+   * GitHub weekly summary
+     These contain tickets, PRs, commits, and assignee data for the week.
+
+2. **Optional context updates** from the user, such as:
+   * Release notes
+   * Customer or partner engagement
+   * Major team milestones or blockers
+
+---
+
+#### **Your Task:**
+
+Create a **Weekly Team Update** using **no more than five bullet points**, written in a clear, leadership-ready tone that blends **technical accuracy** with **organizational context**.
+
+---
+
+#### **Formatting Requirements:**
+
+**Header:**
+
+```
+**Team Name – Weekly Update (MMM D – D, YYYY)**
+```
+
+**Body:**
+
+* Each line begins with a bolded short title describing the achievement or focus area.
+* Include relevant Jira or GitHub links inline (e.g., `[PROJECT-123](https://jira.example.com/browse/PROJECT-123)`, `[PR #456](https://github.com/org/repo/pull/456)`).
+* Each item should be one to two sentences max, emphasizing business or user impact first, then technical detail.
+* Avoid emojis, filler phrases, or overly casual language.
+* Ensure consistent bullet formatting using hyphens (`-`), not asterisks.
+
+---
+
+#### **Tone and Style Guidelines:**
+
+* Professional and confident, but not corporate or stiff.
+* Prioritize clarity and readability over exhaustive detail.
+* Emphasize **value**, **progress**, and **collaboration**.
+* Reference releases, integrations, or partner engagements as forward momentum.
+* Maintain consistency with past updates — crisp, informative, balanced between engineering and leadership audiences.
+
+---
+
+#### **Example Output:**
+
+```
+**Engineering Team – Weekly Update (Nov 5 – 11, 2025)**  
+
+- **Major feature shipped:** Launched authentication system with OAuth 2.0 support ([PROJECT-100](https://jira.example.com/browse/PROJECT-100)), enabling enterprise SSO integrations and improving security posture for large customers.  
+- **Performance optimization:** Reduced API response times by 40% through database indexing improvements ([PR #234](https://github.com/org/repo/pull/234)), directly addressing customer feedback from recent support tickets.  
+- **CI/CD enhancement:** Automated deployment pipeline now includes integration tests ([PROJECT-105](https://jira.example.com/browse/PROJECT-105)), catching regressions before production.  
+- **Documentation update:** Published comprehensive API documentation ([PR #240](https://github.com/org/repo/pull/240)), reducing developer onboarding time and support burden.  
+- **Bug fixes:** Resolved critical data sync issue affecting mobile clients ([PROJECT-110](https://jira.example.com/browse/PROJECT-110)), restoring reliability for 500+ users.  
+```
+
+---
+
+#### **Additional Instructions:**
+
+If additional context is provided (e.g., release notes or partner engagements):
+
+* Integrate them into the top 1–2 bullets, emphasizing milestone value (e.g., "Version 2.0 released…" or "Engaged with enterprise partner…").
+* Always preserve a maximum of **five total bullets**; merge smaller related updates into single, well-structured items.
+* Ensure every update links to at least one relevant ticket or PR when possible.
+
+---
+
