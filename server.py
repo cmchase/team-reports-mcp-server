@@ -801,9 +801,12 @@ class JiraMCPServer:
     async def _link_to_epic(self, issue_key: str, epic_key: str) -> List[TextContent]:
         """Link an issue to an epic"""
         try:
-            # In modern Jira, use parent field for epic relationships
-            issue = self.jira_client.issue(issue_key)
-            issue.update(fields={'parent': {'key': epic_key}})
+            # Get the epic issue to find its ID
+            epic = self.jira_client.issue(epic_key)
+            
+            # Use Jira's add_issues_to_epic method
+            # This properly sets the Epic Link field (customfield_12311140 in Red Hat Jira)
+            self.jira_client.add_issues_to_epic(epic.id, [issue_key])
             
             text = (f"**Issue {issue_key} linked to epic {epic_key} successfully!**\n\n"
                    f"**URL:** {self.jira_client.server_url}/browse/{issue_key}")
