@@ -430,6 +430,24 @@ class JiraMCPServer:
                     }
                 ),
                 Tool(
+                    name="link_to_epic",
+                    description="Link a Jira issue to an epic as its parent",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "issue_key": {
+                                "type": "string",
+                                "description": "The Jira issue key to link"
+                            },
+                            "epic_key": {
+                                "type": "string",
+                                "description": "The epic key to link to"
+                            }
+                        },
+                        "required": ["issue_key", "epic_key"]
+                    }
+                ),
+                Tool(
                     name="get_comments",
                     description="Get all comments for a Jira issue",
                     inputSchema={
@@ -590,6 +608,11 @@ class JiraMCPServer:
                     return await self._add_comment(
                         arguments["issue_key"],
                         arguments["comment"]
+                    )
+                elif name == "link_to_epic":
+                    return await self._link_to_epic(
+                        arguments["issue_key"],
+                        arguments["epic_key"]
                     )
                 elif name == "get_comments":
                     return await self._get_comments(arguments["issue_key"])
@@ -774,6 +797,21 @@ class JiraMCPServer:
             
         except Exception as e:
             return [TextContent(type="text", text=f"Error updating issue {issue_key}: {str(e)}")]
+
+    async def _link_to_epic(self, issue_key: str, epic_key: str) -> List[TextContent]:
+        """Link an issue to an epic"""
+        try:
+            # In modern Jira, use parent field for epic relationships
+            issue = self.jira_client.issue(issue_key)
+            issue.update(fields={'parent': {'key': epic_key}})
+            
+            text = (f"**Issue {issue_key} linked to epic {epic_key} successfully!**\n\n"
+                   f"**URL:** {self.jira_client.server_url}/browse/{issue_key}")
+            
+            return [TextContent(type="text", text=text)]
+            
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error linking issue {issue_key} to epic {epic_key}: {str(e)}")]
 
     async def _add_comment(self, issue_key: str, comment: str) -> List[TextContent]:
         """Add a comment to an issue"""
