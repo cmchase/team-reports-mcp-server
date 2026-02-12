@@ -120,6 +120,7 @@ def load_config_with_overrides(config_overrides: Optional[Dict[str, Any]] = None
     config = {
         'jira': {},
         'github': {},
+        'gitlab': {},
         'team': {}
     }
     
@@ -145,6 +146,16 @@ def load_config_with_overrides(config_overrides: Optional[Dict[str, Any]] = None
             logger.info(f"Loaded GitHub config from {github_config_path}")
         except Exception as e:
             logger.warning(f"Failed to load GitHub config: {e}")
+    
+    # Load GitLab config
+    gitlab_config_path = config_dir / "gitlab_config.yaml"
+    if gitlab_config_path.exists():
+        try:
+            with open(gitlab_config_path, 'r') as f:
+                config['gitlab'] = yaml.safe_load(f) or {}
+            logger.info(f"Loaded GitLab config from {gitlab_config_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load GitLab config: {e}")
     
     # Load team config
     team_config_path = config_dir / "team_config.yaml"
@@ -542,7 +553,7 @@ class JiraMCPServer:
                 ),
                 Tool(
                     name="generate_weekly_status",
-                    description="Generate weekly team status report combining Jira and GitHub data. Checks for existing reports to avoid duplicate API calls. After generating, a customizable prompt will be provided for creating an executive summary (customize via config/executive_summary_prompt.txt).",
+                    description="Generate weekly team status report combining Jira, GitHub, and optionally GitLab data. Checks for existing reports to avoid duplicate API calls. GitHub token from github_token or GITHUB_TOKEN; GitLab token from gitlab_token or GITLAB_TOKEN (for self-hosted/VPN GitLab). After generating, a customizable prompt will be provided for creating an executive summary (customize via config/executive_summary_prompt.txt).",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -557,6 +568,10 @@ class JiraMCPServer:
                             "github_token": {
                                 "type": "string",
                                 "description": "GitHub API token for accessing repository data. If not provided, reads from GITHUB_TOKEN environment variable."
+                            },
+                            "gitlab_token": {
+                                "type": "string",
+                                "description": "GitLab API token for GitLab data (e.g. self-hosted/VPN). If not provided, reads from GITLAB_TOKEN environment variable. Only used when config/gitlab_config.yaml exists."
                             },
                             "regenerate": {
                                 "type": "boolean",
@@ -634,7 +649,8 @@ class JiraMCPServer:
                     )
                 elif name == "generate_weekly_status":
                     return await self._generate_weekly_status(
-                        arguments.get("github_token"),  # Now optional
+                        arguments.get("github_token"),
+                        arguments.get("gitlab_token"),
                         arguments.get("start_date"),
                         arguments.get("end_date"),
                         arguments.get("regenerate", False),
@@ -988,16 +1004,18 @@ class JiraMCPServer:
     async def _generate_weekly_status(
         self,
         github_token: Optional[str] = None,
+        gitlab_token: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         regenerate: bool = False,
         config_overrides: Optional[Dict[str, Any]] = None
     ) -> List[TextContent]:
         """
-        Generate weekly team status report combining Jira and GitHub data.
+        Generate weekly team status report combining Jira, GitHub, and optionally GitLab data.
         
         Args:
             github_token: Optional GitHub API token (reads from GITHUB_TOKEN env var if not provided)
+            gitlab_token: Optional GitLab API token (reads from GITLAB_TOKEN env var if not provided)
             start_date: Optional start date (YYYY-MM-DD), defaults to current date
             end_date: Optional end date (YYYY-MM-DD), defaults to 7 days before start
             regenerate: Force regeneration even if report exists
@@ -1037,6 +1055,9 @@ class JiraMCPServer:
             # Get GitHub token from parameter or environment variable
             if not github_token:
                 github_token = os.getenv("GITHUB_TOKEN")
+            # Get GitLab token (optional; only needed when gitlab_config.yaml and projects are configured)
+            if not gitlab_token:
+                gitlab_token = os.getenv("GITLAB_TOKEN")
             
             # Validate all required credentials
             missing_creds = []
@@ -1058,7 +1079,7 @@ class JiraMCPServer:
             
             # Import team-reports library
             try:
-                from team_reports import WeeklyJiraSummary, WeeklyGitHubSummary
+                from team_reports import WeeklyJiraSummary, WeeklyGitHubSummary, WeeklyGitLabSummary
             except ImportError as e:
                 return [TextContent(
                     type="text",
@@ -1070,7 +1091,9 @@ class JiraMCPServer:
             server_dir = Path(__file__).parent.absolute()
             jira_config_file = str(server_dir / 'config' / 'jira_config.yaml')
             github_config_file = str(server_dir / 'config' / 'github_config.yaml')
+            gitlab_config_file = str(server_dir / 'config' / 'gitlab_config.yaml')
             temp_files_to_cleanup = []
+            gitlab_report = ""
             
             try:
                 # Create temp config files if overrides provided
@@ -1094,6 +1117,16 @@ class JiraMCPServer:
                     if github_config:
                         github_config_file = create_temp_config_file(github_config, prefix='github_mcp_')
                         temp_files_to_cleanup.append(github_config_file)
+                    
+                    # Merge GitLab config with overrides
+                    gitlab_config = merge_config_with_defaults(
+                        config_overrides,
+                        gitlab_config_file,
+                        'gitlab'
+                    )
+                    if gitlab_config:
+                        gitlab_config_file = create_temp_config_file(gitlab_config, prefix='gitlab_mcp_')
+                        temp_files_to_cleanup.append(gitlab_config_file)
                 
                 # Generate Jira weekly report
                 logger.info(f"Generating Jira weekly report using config: {jira_config_file}")
@@ -1129,6 +1162,31 @@ class JiraMCPServer:
                 except Exception as e:
                     logger.error(f"Failed to generate GitHub report: {e}")
                     github_report = f"**Error generating GitHub report:** {str(e)}\n\n"
+                
+                # Generate GitLab weekly report when config and token are present
+                if config.get("gitlab") and (gitlab_token or os.getenv("GITLAB_TOKEN")):
+                    token = gitlab_token or os.getenv("GITLAB_TOKEN")
+                    if os.path.exists(gitlab_config_file):
+                        logger.info(f"Generating GitLab weekly report using config: {gitlab_config_file}")
+                        try:
+                            gitlab_summary = WeeklyGitLabSummary(
+                                config_file=gitlab_config_file,
+                                gitlab_token=token
+                            )
+                            gitlab_report, _ = gitlab_summary.generate_report(
+                                start_date=calc_start_date,
+                                end_date=calc_end_date,
+                                config_file=gitlab_config_file
+                            )
+                            logger.info(f"Generated GitLab report: {len(gitlab_report)} characters")
+                        except Exception as e:
+                            logger.error(f"Failed to generate GitLab report: {e}")
+                            gitlab_report = f"**Error generating GitLab report:** {str(e)}\n\n"
+                    else:
+                        logger.info("GitLab config file not found; skipping GitLab section")
+                else:
+                    if config.get("gitlab") and not (gitlab_token or os.getenv("GITLAB_TOKEN")):
+                        logger.info("GitLab config present but no GITLAB_TOKEN; skipping GitLab section")
             
             finally:
                 # Clean up temporary config files
@@ -1141,21 +1199,15 @@ class JiraMCPServer:
                         logger.warning(f"Could not delete temp file {temp_file}: {e}")
             
             # Combine reports
-            combined_report = f"""# Weekly Team Status Report
-## Period: {calc_start_date} to {calc_end_date}
-
----
-
-{jira_report}
-
----
-
-{github_report}
-
----
-
-*Report generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}*
-"""
+            report_sections = [jira_report, github_report]
+            if gitlab_report:
+                report_sections.append(gitlab_report)
+            combined_report = "# Weekly Team Status Report\n## Period: {} to {}\n\n---\n\n{}\n\n---\n\n*Report generated: {}*\n".format(
+                calc_start_date,
+                calc_end_date,
+                "\n\n---\n\n".join(report_sections),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            )
             
             # Save report to disk
             try:

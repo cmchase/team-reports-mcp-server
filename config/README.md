@@ -33,7 +33,8 @@ The server will automatically load your custom prompt when generating weekly sta
 
 **`jira_config.yaml`** - Jira project and team configuration  
 **`github_config.yaml`** - GitHub repositories and team mapping  
-**`team_config.yaml`** - Team member information and mappings  
+**`gitlab_config.yaml`** - GitLab projects (optional; for self-hosted/VPN instances, e.g. gitlab.cee.redhat.com). Set `GITLAB_TOKEN` in .env when using.  
+**`team_config.yaml`** - Team member information and mappings (includes `gitlab_username` per member for identity mapping)  
 **`default_config.yaml`** - Default configuration values
 
 See the main README.md for more information about these configuration files.
