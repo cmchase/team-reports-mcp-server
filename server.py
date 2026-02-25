@@ -10,8 +10,11 @@ import asyncio
 import json
 import logging
 import os
+import ssl
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -34,6 +37,22 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def load_manager_coach_brief() -> Optional[str]:
+    """
+    Load manager coach brief from config file if present.
+    Returns None if file does not exist (use embedded default in _get_manager_coach_brief).
+    """
+    server_dir = Path(__file__).parent.absolute()
+    prompt_file = server_dir / "config" / "manager_coach_brief.txt"
+    try:
+        if prompt_file.exists():
+            with open(prompt_file, "r", encoding="utf-8") as f:
+                return f.read()
+    except Exception as e:
+        logger.warning(f"Could not load manager coach brief: {e}")
+    return None
+
 
 def load_executive_summary_prompt() -> str:
     """
@@ -86,21 +105,25 @@ def get_week_range(start_date: Optional[str] = None, end_date: Optional[str] = N
     Raises:
         ValueError: If start_date is not Wednesday or end_date is not Tuesday
     """
-    if start_date:
-        start = datetime.strptime(start_date, "%Y-%m-%d")
-        # Validate it's a Wednesday (weekday() returns 2 for Wednesday)
-        if start.weekday() != 2:
-            raise ValueError(f"start_date must be a Wednesday. {start_date} is a {start.strftime('%A')}")
-    else:
-        # Default to current date
-        start = datetime.now()
-    
     if end_date:
         end = datetime.strptime(end_date, "%Y-%m-%d")
         # Validate it's a Tuesday (weekday() returns 1 for Tuesday)
         if end.weekday() != 1:
             raise ValueError(f"end_date must be a Tuesday. {end_date} is a {end.strftime('%A')}")
+        if start_date:
+            start = datetime.strptime(start_date, "%Y-%m-%d")
+            if start.weekday() != 2:
+                raise ValueError(f"start_date must be a Wednesday. {start_date} is a {start.strftime('%A')}")
+        else:
+            # Derive Wednesday from Tuesday (6 days back)
+            start = end - timedelta(days=6)
     else:
+        if start_date:
+            start = datetime.strptime(start_date, "%Y-%m-%d")
+            if start.weekday() != 2:
+                raise ValueError(f"start_date must be a Wednesday. {start_date} is a {start.strftime('%A')}")
+        else:
+            start = datetime.now()
         # Calculate end date as 6 days forward from start (Wednesday + 6 days = Tuesday)
         end = start + timedelta(days=6)
     
@@ -179,6 +202,59 @@ def load_config_with_overrides(config_overrides: Optional[Dict[str, Any]] = None
     return config
 
 
+def _test_github_sync(github_config: Dict[str, Any]) -> str:
+    """Test GitHub: GET /user with token. Returns a status line."""
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+    if not token:
+        return "**GitHub:** No GITHUB_TOKEN set (required for API).\n"
+    url = "https://api.github.com/user"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+            login = data.get("login", "?")
+            org = (github_config or {}).get("github_org") or (github_config or {}).get("org", "")
+            if org:
+                org_url = f"https://api.github.com/orgs/{org}"
+                req_org = urllib.request.Request(org_url, headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json"})
+                try:
+                    with urllib.request.urlopen(req_org, timeout=10) as _:
+                        pass
+                except urllib.error.HTTPError as e:
+                    return f"**GitHub:** Authenticated as {login}; org '{org}' not accessible ({e.code}).\n"
+            return f"**GitHub:** OK — authenticated as {login}" + (f", org '{org}' OK" if org else "") + "\n"
+    except urllib.error.HTTPError as e:
+        body = e.read().decode() if e.fp else ""
+        return f"**GitHub:** Failed — HTTP {e.code}" + (f" {body[:200]}" if body else "") + "\n"
+    except Exception as e:
+        return f"**GitHub:** Failed — {str(e)}\n"
+
+
+def _test_gitlab_sync(gitlab_config: Dict[str, Any]) -> str:
+    """Test GitLab: GET /api/v4/user with token. Returns a status line."""
+    token = os.getenv("GITLAB_TOKEN", "").strip()
+    if not token:
+        return "**GitLab:** No GITLAB_TOKEN set (required for API).\n"
+    base = (gitlab_config or {}).get("base_url", "https://gitlab.com").rstrip("/")
+    url = f"{base}/api/v4/user"
+    req = urllib.request.Request(url, headers={"PRIVATE-TOKEN": token})
+    ctx = ssl.create_default_context()
+    api_settings = (gitlab_config or {}).get("api_settings") or {}
+    if api_settings.get("verify_ssl") is False:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+            data = json.loads(resp.read().decode())
+            username = data.get("username", data.get("name", "?"))
+            return f"**GitLab:** OK — connected to {base}, user {username}\n"
+    except urllib.error.HTTPError as e:
+        body = e.read().decode() if e.fp else ""
+        return f"**GitLab:** Failed — HTTP {e.code}" + (f" {body[:200]}" if body else "") + "\n"
+    except Exception as e:
+        return f"**GitLab:** Failed — {str(e)}\n"
+
+
 def get_report_path(start_date: str, end_date: str) -> Path:
     """
     Construct the path for a weekly report file.
@@ -196,6 +272,14 @@ def get_report_path(start_date: str, end_date: str) -> Path:
     reports_dir.mkdir(exist_ok=True)
     filename = f"Weekly_Report_{start_date}_to_{end_date}.md"
     return reports_dir / filename
+
+
+def get_flow_metrics_report_path(start_date: str, end_date: str) -> Path:
+    """Path for a saved flow metrics report (Reports/Flow_Metrics_{start}_to_{end}.md)."""
+    server_dir = Path(__file__).parent.absolute()
+    reports_dir = server_dir / "Reports"
+    reports_dir.mkdir(exist_ok=True)
+    return reports_dir / f"Flow_Metrics_{start_date}_to_{end_date}.md"
 
 
 def check_report_exists(start_date: str, end_date: str) -> Optional[str]:
@@ -585,6 +669,150 @@ class JiraMCPServer:
                         },
                         "required": []
                     }
+                ),
+                Tool(
+                    name="get_manager_attention_items",
+                    description="Items that likely need your guidance or feedback: unassigned tickets, tickets stuck in Refinement or Review, high-priority work in progress. Uses team Jira config (base_jql, status_filters).",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "days_in_refinement": {
+                                "type": "integer",
+                                "description": "Treat Refinement as needing attention after this many days. Default: 3",
+                                "default": 3
+                            },
+                            "days_in_review": {
+                                "type": "integer",
+                                "description": "Treat Review as needing attention after this many days. Default: 5",
+                                "default": 5
+                            },
+                            "include_unassigned": {
+                                "type": "boolean",
+                                "description": "Include unassigned issues. Default: true",
+                                "default": True
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Maximum items to return. Default: 30",
+                                "default": 30
+                            },
+                            "config_overrides": {
+                                "type": "object",
+                                "description": "Optional config overrides (e.g. jira.base_jql)"
+                            }
+                        },
+                        "required": []
+                    }
+                ),
+                Tool(
+                    name="get_lingering_items",
+                    description="Tickets and context on work that has lingered in the same state (e.g. In Progress or Review) for too long. Helps spot stalled work and review bottlenecks. Uses team Jira config.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "days_lingering": {
+                                "type": "integer",
+                                "description": "Consider an item lingering after this many days in same state. Default: 7",
+                                "default": 7
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Maximum tickets to return. Default: 50",
+                                "default": 50
+                            },
+                            "config_overrides": {
+                                "type": "object",
+                                "description": "Optional config overrides"
+                            }
+                        },
+                        "required": []
+                    }
+                ),
+                Tool(
+                    name="get_bottlenecks_and_priorities",
+                    description="Summary of bottlenecks and priority items: WIP counts by status, high-priority in-progress tickets, and suggested focus areas. Uses team Jira config.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Max high-priority in-progress items to list. Default: 20",
+                                "default": 20
+                            },
+                            "config_overrides": {
+                                "type": "object",
+                                "description": "Optional config overrides"
+                            }
+                        },
+                        "required": []
+                    }
+                ),
+                Tool(
+                    name="get_manager_coach_brief",
+                    description="Operator Coach brief: what to watch for team health and execution cadence, weekly cadence checklist, and tactical prompts. Use after reviewing lingering items or bottlenecks to align actions with coach guidance.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "include_data_context": {
+                                "type": "boolean",
+                                "description": "If true, include a short note suggesting you run get_lingering_items and get_bottlenecks_and_priorities first. Default: true",
+                                "default": True
+                            }
+                        },
+                        "required": []
+                    }
+                ),
+                Tool(
+                    name="get_flow_metrics",
+                    description="Flow metrics for team health: cycle time, lead time, throughput, predictability (std dev, percentiles) over a date range. Delegates to team-reports library; uses config status_filters (execution, completed). For long periods, use CLI: team-reports jira flow-metrics.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "start_date": {
+                                "type": "string",
+                                "description": "Start date YYYY-MM-DD. Omit if using period preset."
+                            },
+                            "end_date": {
+                                "type": "string",
+                                "description": "End date YYYY-MM-DD. Omit if using period preset."
+                            },
+                            "period": {
+                                "type": "string",
+                                "enum": ["last_week", "last_month", "last_quarter"],
+                                "description": "Preset range from today: last_week (7 days), last_month (30 days), last_quarter (90 days). Ignored if start_date and end_date are provided."
+                            },
+                            "max_issues": {
+                                "type": "integer",
+                                "description": "Max issues to fetch with changelog for metrics. Default: 100 (use 300+ if you need a larger sample and can wait longer).",
+                                "default": 100
+                            },
+                            "config_overrides": {
+                                "type": "object",
+                                "description": "Optional config overrides (e.g. jira.base_jql, jira.status_filters)."
+                            },
+                            "save_report": {
+                                "type": "boolean",
+                                "description": "If true, save the flow metrics report to Reports/Flow_Metrics_{start}_to_{end}.md. Default: false (output only in chat).",
+                                "default": False
+                            }
+                        },
+                        "required": []
+                    }
+                ),
+                Tool(
+                    name="test_connections",
+                    description="Test connectivity and credentials for Jira, GitHub, and/or GitLab. Runs a minimal API call per instance. Use to verify env vars and config before running reports or Jira tools.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "connections": {
+                                "type": "array",
+                                "items": {"type": "string", "enum": ["jira", "github", "gitlab"]},
+                                "description": "Which instances to test. Default: all configured (jira, github, gitlab if config exists)."
+                            }
+                        },
+                        "required": []
+                    }
                 )
             ]
 
@@ -592,11 +820,13 @@ class JiraMCPServer:
         async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             """Handle tool calls"""
             
-            # Initialize Jira client if not already done
-            if not self.jira_client:
+            # Initialize Jira client only when needed (not for test_connections alone)
+            if name != "test_connections" and not self.jira_client:
                 await self._init_jira_client()
             
             try:
+                if name == "test_connections":
+                    return await self._test_connections(arguments.get("connections"))
                 if name == "get_issue":
                     return await self._get_issue(arguments["issue_key"])
                 elif name == "search_issues":
@@ -656,6 +886,38 @@ class JiraMCPServer:
                         arguments.get("regenerate", False),
                         arguments.get("config_overrides")
                     )
+                elif name == "get_manager_attention_items":
+                    return await self._get_manager_attention_items(
+                        arguments.get("days_in_refinement", 3),
+                        arguments.get("days_in_review", 5),
+                        arguments.get("include_unassigned", True),
+                        arguments.get("max_results", 30),
+                        arguments.get("config_overrides")
+                    )
+                elif name == "get_lingering_items":
+                    return await self._get_lingering_items(
+                        arguments.get("days_lingering", 7),
+                        arguments.get("max_results", 50),
+                        arguments.get("config_overrides")
+                    )
+                elif name == "get_bottlenecks_and_priorities":
+                    return await self._get_bottlenecks_and_priorities(
+                        arguments.get("max_results", 20),
+                        arguments.get("config_overrides")
+                    )
+                elif name == "get_manager_coach_brief":
+                    return await self._get_manager_coach_brief(
+                        arguments.get("include_data_context", True)
+                    )
+                elif name == "get_flow_metrics":
+                    return await self._get_flow_metrics(
+                        arguments.get("start_date"),
+                        arguments.get("end_date"),
+                        arguments.get("period"),
+                        arguments.get("max_issues", 100),
+                        arguments.get("config_overrides"),
+                        arguments.get("save_report", False)
+                    )
                 else:
                     return [TextContent(type="text", text=f"Unknown tool: {name}")]
                     
@@ -674,9 +936,12 @@ class JiraMCPServer:
                 raise ValueError("Missing required environment variables: JIRA_SERVER, JIRA_EMAIL, JIRA_API_TOKEN")
             
             from jira.client import TokenAuth
+            # Timeout (seconds) to avoid hanging on slow or large responses (e.g. flow metrics with changelog)
+            jira_timeout = 120
             self.jira_client = JIRA(
                 server=server,
-                token_auth=api_token
+                token_auth=api_token,
+                timeout=jira_timeout,
             )
             logger.info("Successfully connected to Jira")
             
@@ -1000,6 +1265,320 @@ class JiraMCPServer:
             
         except Exception as e:
             return [TextContent(type="text", text=f"Error fetching project issues: {str(e)}")]
+
+    def _get_base_jql(self, config_overrides: Optional[Dict[str, Any]] = None) -> str:
+        """Load Jira config and return base_jql as a single line for JQL."""
+        config = load_config_with_overrides(config_overrides)
+        jira = config.get("jira") or {}
+        base = (jira.get("base_jql") or "project is not empty").strip()
+        return " ".join(base.split())
+
+    def _get_status_lists(self, config_overrides: Optional[Dict[str, Any]] = None) -> Dict[str, List[str]]:
+        """Load Jira status_filters from config with defaults."""
+        config = load_config_with_overrides(config_overrides)
+        jira = config.get("jira") or {}
+        status_filters = jira.get("status_filters") or {}
+        return {
+            "execution": status_filters.get("execution") or ["In Progress", "Review"],
+            "planned": status_filters.get("planned") or ["New", "Refinement", "To Do"],
+            "completed": status_filters.get("completed") or ["Closed"],
+        }
+
+    async def _get_manager_attention_items(
+        self,
+        days_in_refinement: int = 3,
+        days_in_review: int = 5,
+        include_unassigned: bool = True,
+        max_results: int = 30,
+        config_overrides: Optional[Dict[str, Any]] = None,
+    ) -> List[TextContent]:
+        """Return Jira items that need manager guidance or feedback."""
+        try:
+            if not self.jira_client:
+                return [TextContent(type="text", text="Jira client not initialized.")]
+            base_jql = self._get_base_jql(config_overrides)
+            status_lists = self._get_status_lists(config_overrides)
+            refinement = status_lists["planned"]
+            execution = status_lists["execution"]
+            # Build OR conditions: (Refinement + old) OR (Review + old) OR unassigned OR (high priority + in progress/review)
+            refinement_statuses = ", ".join(f'"{s}"' for s in refinement if "efinement" in s or s == "Refinement")
+            execution_statuses = ", ".join(f'"{s}"' for s in execution)
+            conditions = []
+            if refinement_statuses and days_in_refinement > 0:
+                conditions.append(f'(status IN ({refinement_statuses}) AND updated < -{days_in_refinement}d)')
+            if execution_statuses and days_in_review > 0:
+                conditions.append(f'(status IN ({execution_statuses}) AND updated < -{days_in_review}d)')
+            if include_unassigned:
+                conditions.append("assignee is EMPTY")
+            if execution_statuses:
+                conditions.append(f'(priority IN (Critical, Blocker) AND status IN ({execution_statuses}))')
+            if not conditions:
+                return [TextContent(type="text", text="**Manager attention:** No conditions configured (check status_filters in Jira config).")]
+            jql = f"({base_jql}) AND ({' OR '.join(conditions)}) ORDER BY priority DESC, updated ASC"
+            issues = self.jira_client.search_issues(jql, maxResults=max_results)
+            if not issues:
+                return [TextContent(type="text", text="**Manager attention:** No items need your guidance right now.")]
+            lines = ["**Items that may need your guidance or feedback**\n"]
+            for issue in issues:
+                assignee = issue.fields.assignee.displayName if issue.fields.assignee else "Unassigned"
+                pri = issue.fields.priority.name if issue.fields.priority else "—"
+                updated = str(issue.fields.updated)[:10] if issue.fields.updated else "—"
+                url = f"{self.jira_client.server_url}/browse/{issue.key}"
+                lines.append(f"- **{issue.key}** — {issue.fields.summary}\n  Status: {issue.fields.status.name} | Assignee: {assignee} | Priority: {pri} | Updated: {updated}\n  {url}\n")
+            return [TextContent(type="text", text="\n".join(lines))]
+        except Exception as e:
+            logger.error(f"Error in get_manager_attention_items: {e}")
+            return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+    async def _get_lingering_items(
+        self,
+        days_lingering: int = 7,
+        max_results: int = 50,
+        config_overrides: Optional[Dict[str, Any]] = None,
+    ) -> List[TextContent]:
+        """Return tickets that have lingered in execution state (e.g. In Progress, Review)."""
+        try:
+            if not self.jira_client:
+                return [TextContent(type="text", text="Jira client not initialized.")]
+            base_jql = self._get_base_jql(config_overrides)
+            status_lists = self._get_status_lists(config_overrides)
+            execution_statuses = ", ".join(f'"{s}"' for s in status_lists["execution"])
+            jql = f'({base_jql}) AND status IN ({execution_statuses}) AND updated < -{days_lingering}d ORDER BY updated ASC'
+            issues = self.jira_client.search_issues(jql, maxResults=max_results)
+            if not issues:
+                return [TextContent(type="text", text=f"**Lingering items:** No tickets in progress/review older than {days_lingering} days.")]
+            lines = [f"**Tickets in progress/review for more than {days_lingering} days**\n"]
+            for issue in issues:
+                assignee = issue.fields.assignee.displayName if issue.fields.assignee else "Unassigned"
+                updated = str(issue.fields.updated)[:10] if issue.fields.updated else "—"
+                url = f"{self.jira_client.server_url}/browse/{issue.key}"
+                lines.append(f"- **{issue.key}** — {issue.fields.summary}\n  Status: {issue.fields.status.name} | Assignee: {assignee} | Updated: {updated}\n  {url}\n")
+            lines.append("\n*For open PRs that may be lingering, run generate_weekly_status and review the PR/merge request section.*")
+            return [TextContent(type="text", text="\n".join(lines))]
+        except Exception as e:
+            logger.error(f"Error in get_lingering_items: {e}")
+            return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+    async def _get_bottlenecks_and_priorities(
+        self,
+        max_results: int = 20,
+        config_overrides: Optional[Dict[str, Any]] = None,
+    ) -> List[TextContent]:
+        """Return WIP counts by status and high-priority in-progress items."""
+        try:
+            if not self.jira_client:
+                return [TextContent(type="text", text="Jira client not initialized.")]
+            base_jql = self._get_base_jql(config_overrides)
+            status_lists = self._get_status_lists(config_overrides)
+            planned = status_lists["planned"]
+            execution = status_lists["execution"]
+            all_active = list(planned) + list(execution)
+            statuses_jql = ", ".join(f'"{s}"' for s in all_active)
+            jql_all = f'({base_jql}) AND status IN ({statuses_jql})'
+            issues = self.jira_client.search_issues(jql_all, maxResults=500)
+            by_status: Dict[str, int] = {}
+            for issue in issues:
+                s = issue.fields.status.name
+                by_status[s] = by_status.get(s, 0) + 1
+            exec_jql = ", ".join(f'"{s}"' for s in execution)
+            high_priority_jql = f'({base_jql}) AND status IN ({exec_jql}) AND priority IN (Critical, Blocker) ORDER BY updated DESC'
+            high = self.jira_client.search_issues(high_priority_jql, maxResults=max_results)
+            lines = ["**Bottlenecks and priorities**\n"]
+            lines.append("**WIP by status:**")
+            for s in sorted(by_status.keys(), key=lambda x: -by_status[x]):
+                lines.append(f"  - {s}: {by_status[s]}")
+            lines.append("\n**High-priority in progress/review:**")
+            if not high:
+                lines.append("  None.")
+            else:
+                for issue in high:
+                    assignee = issue.fields.assignee.displayName if issue.fields.assignee else "Unassigned"
+                    url = f"{self.jira_client.server_url}/browse/{issue.key}"
+                    lines.append(f"  - **{issue.key}** — {issue.fields.summary} ({assignee}) — {url}")
+            lines.append("\n*Suggested focus: unblock high-priority items first; then reduce review/In Progress age (see get_lingering_items).*")
+            return [TextContent(type="text", text="\n".join(lines))]
+        except Exception as e:
+            logger.error(f"Error in get_bottlenecks_and_priorities: {e}")
+            return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+    async def _get_flow_metrics(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        period: Optional[str] = None,
+        max_issues: int = 100,
+        config_overrides: Optional[Dict[str, Any]] = None,
+        save_report: bool = False,
+    ) -> List[TextContent]:
+        """
+        Flow metrics (cycle time, lead time, throughput) via team-reports library.
+        Delegates to team-reports; config_overrides are not applied.
+        """
+        try:
+            from team_reports.reports.jira_flow_metrics import (
+                JiraFlowMetricsReport,
+                get_date_range_for_days,
+            )
+
+            # Resolve date range (same semantics as before)
+            end_dt = datetime.now()
+            if start_date and end_date:
+                try:
+                    datetime.strptime(start_date, "%Y-%m-%d")
+                    datetime.strptime(end_date, "%Y-%m-%d")
+                    calc_start, calc_end = start_date, end_date
+                except ValueError as e:
+                    return [TextContent(type="text", text=f"Invalid dates: {e}. Use YYYY-MM-DD.")]
+            elif period:
+                if period == "last_week":
+                    calc_start, calc_end = get_date_range_for_days(7)
+                elif period == "last_month":
+                    calc_start, calc_end = get_date_range_for_days(30)
+                elif period == "last_quarter":
+                    calc_start, calc_end = get_date_range_for_days(90)
+                else:
+                    return [TextContent(
+                        type="text",
+                        text=f"Unknown period: {period}. Use last_week, last_month, or last_quarter.",
+                    )]
+            else:
+                calc_start, calc_end = get_date_range_for_days(30)
+
+            server_dir = Path(__file__).resolve().parent
+            config_file = str(server_dir / "config" / "jira_config.yaml")
+
+            def _run_flow_metrics_sync() -> str:
+                report = JiraFlowMetricsReport(
+                    config_file=config_file,
+                    jira_server=os.getenv("JIRA_SERVER"),
+                    jira_email=os.getenv("JIRA_EMAIL"),
+                    jira_token=os.getenv("JIRA_API_TOKEN"),
+                )
+                report.initialize()
+                return report.generate_report(calc_start, calc_end, max_issues=max_issues)
+
+            FLOW_METRICS_TIMEOUT = 600  # 10 min (no longer limited by MCP; team-reports is the source)
+            logger.info("Flow metrics: delegating to team-reports (%s to %s)...", calc_start, calc_end)
+            loop = asyncio.get_event_loop()
+            report_text = await asyncio.wait_for(
+                loop.run_in_executor(None, _run_flow_metrics_sync),
+                timeout=FLOW_METRICS_TIMEOUT,
+            )
+
+            if save_report:
+                def _write_sync() -> Tuple[Optional[Path], Optional[str]]:
+                    try:
+                        path = get_flow_metrics_report_path(calc_start, calc_end)
+                        path.write_text(report_text, encoding="utf-8")
+                        return (path, None)
+                    except Exception as e:
+                        return (None, str(e))
+
+                try:
+                    flow_path, save_err = await asyncio.wait_for(
+                        loop.run_in_executor(None, _write_sync),
+                        timeout=15.0,
+                    )
+                    if save_err:
+                        logger.warning("Failed to save flow metrics report: %s", save_err)
+                        report_text += f"\n\n*Could not save report to disk: {save_err}*"
+                    else:
+                        logger.info("Saved flow metrics report to %s", flow_path)
+                        report_text += f"\n\n**Report saved to:** `{flow_path}`"
+                except asyncio.TimeoutError:
+                    report_text += "\n\n*Save to disk timed out (report is still shown above).*"
+
+            return [TextContent(type="text", text=report_text)]
+        except asyncio.TimeoutError:
+            logger.warning("Flow metrics timed out")
+            return [TextContent(
+                type="text",
+                text=(
+                    "Flow metrics request timed out. For long periods or large boards, run from the CLI: "
+                    "`team-reports jira flow-metrics --quarter N --year Y` or `--days N`."
+                ),
+            )]
+        except ImportError as e:
+            logger.error("team-reports not available for flow metrics: %s", e)
+            return [TextContent(
+                type="text",
+                text="Flow metrics require the team-reports package. Install it (e.g. pip install team-reports) or run from CLI: team-reports jira flow-metrics.",
+            )]
+        except Exception as e:
+            logger.error("Error in get_flow_metrics: %s", e)
+            return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+    async def _test_connections(
+        self,
+        connections: Optional[List[str]] = None,
+    ) -> List[TextContent]:
+        """Test connectivity for Jira, GitHub, and/or GitLab. Returns a summary per instance."""
+        config = load_config_with_overrides(None)
+        to_test = connections or []
+        if not to_test:
+            to_test = ["jira", "github", "gitlab"]
+        results: List[str] = ["## Connection test results\n"]
+        for conn in to_test:
+            if conn == "jira":
+                results.append(await self._test_jira_connection())
+            elif conn == "github":
+                results.append(_test_github_sync(config.get("github") or {}))
+            elif conn == "gitlab":
+                results.append(_test_gitlab_sync(config.get("gitlab") or {}))
+            else:
+                results.append(f"**{conn}:** Unknown connection type (use jira, github, gitlab).\n")
+        return [TextContent(type="text", text="\n".join(results))]
+
+    async def _test_jira_connection(self) -> str:
+        """Test Jira: init client and run one search. Returns a status line."""
+        try:
+            if not self.jira_client:
+                await self._init_jira_client()
+            if not self.jira_client:
+                return "**Jira:** Not initialized (check JIRA_SERVER, JIRA_EMAIL, JIRA_API_TOKEN).\n"
+            self.jira_client.search_issues("order by updated DESC", maxResults=1)
+            url = getattr(self.jira_client, "server_url", "") or os.getenv("JIRA_SERVER", "?")
+            return f"**Jira:** OK — connected to {url}\n"
+        except Exception as e:
+            return f"**Jira:** Failed — {str(e)}\n"
+
+    async def _get_manager_coach_brief(
+        self,
+        include_data_context: bool = True,
+    ) -> List[TextContent]:
+        """Return Operator Coach brief for team health and execution cadence."""
+        custom = load_manager_coach_brief()
+        if custom:
+            if include_data_context:
+                custom += "\n---\n*Tip: Run **get_lingering_items** and **get_bottlenecks_and_priorities** first, then use this brief to decide what to act on.*\n"
+            return [TextContent(type="text", text=custom)]
+        brief = """## Manager Coach Brief (Operator perspective)
+
+**What to watch for team health and execution**
+- **Review latency** — Items stuck in Review > 5 days: unblock or re-prioritize.
+- **WIP depth** — Too many In Progress per person: narrow focus or adjust commitments.
+- **Unassigned / refinement backlog** — Tickets sitting without owner or in Refinement > 3 days: assign or clarify.
+- **Priority alignment** — Critical/Blocker in progress should have a clear path to done; escalate if blocked.
+
+**Weekly cadence (10 min, Friday)**
+1. **Top 3 outcomes** you're driving (not tasks).
+2. **1 decision needed from above** — write the recommendation. *(Leaders love this.)*
+3. **1 risk** you're surfacing early.
+4. **1 experiment or learning** you're capturing for visibility (e.g. AI usage, process change).
+
+**Tactical prompts when things feel stuck**
+- *Room is vague:* "What decision are we making today, and who's the decider?"
+- *Work ballooning:* "What are we not doing so we can do this well?"
+- *No measurable value:* "How will we know this worked, in a way the business cares about?"
+- *One dominant voice:* "I want two other perspectives before we converge. Who sees it differently?"
+
+**Rules of engagement**
+- Default to action, but demand definition: *Define done and owner before starting.*
+- Escalate early, not often: when decision stuck, risk rising, dependency blocking, or scope unclear.
+"""
+        if include_data_context:
+            brief += "\n---\n*Tip: Run **get_lingering_items** and **get_bottlenecks_and_priorities** first, then use this brief to decide what to act on.*\n"
+        return [TextContent(type="text", text=brief)]
 
     async def _generate_weekly_status(
         self,

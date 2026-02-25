@@ -4,7 +4,7 @@ A clean and focused Model Context Protocol (MCP) server that provides seamless i
 
 ## 🎯 Features
 
-- **16 Comprehensive Tools** for full Jira interaction and manager workflows
+- **17 Comprehensive Tools** for full Jira interaction, manager workflows, and flow metrics
 - **Weekly Team Reports** - Automated Jira + GitHub status reports with auto-generated AI executive summaries
 - **Natural Language Interface** - Ask AI to manage your Jira work
 - **Real-time Updates** - Get current project status and issue information
@@ -33,6 +33,7 @@ A clean and focused Model Context Protocol (MCP) server that provides seamless i
 | `get_lingering_items` | Tickets lingering in progress/review | `get_lingering_items(days_lingering=7)` |
 | `get_bottlenecks_and_priorities` | WIP by status + high-priority in progress | `get_bottlenecks_and_priorities()` |
 | `get_manager_coach_brief` | Operator Coach: what to watch for team health and execution | `get_manager_coach_brief()` |
+| `get_flow_metrics` | Cycle time, lead time, throughput, predictability over a date range (Kanban-friendly) | `get_flow_metrics(period="last_month")` or `get_flow_metrics(start_date="2026-01-01", end_date="2026-01-31")` |
 | `test_connections` | Test Jira, GitHub, and GitLab connectivity and credentials | `test_connections()` or `test_connections(connections=["jira", "github"])` |
 
 ### Manager workflow (busy engineering managers)
@@ -43,12 +44,13 @@ Use these tools to focus on items that need your guidance, spot bottlenecks, and
 2. **get_lingering_items** — Tickets in progress or review for longer than `days_lingering` (default 7). Surfaces stalled work and review bottlenecks.
 3. **get_bottlenecks_and_priorities** — WIP counts by status and a list of Critical/Blocker items in progress. Use to prioritize where to unblock.
 4. **get_manager_coach_brief** — Operator Coach perspective: what to watch for team health and execution cadence, weekly cadence checklist, and tactical prompts. Optional: add `config/manager_coach_brief.txt` to customize the brief.
+5. **get_flow_metrics** — Cycle time, lead time, throughput, and predictability (std dev, percentiles) over a date range. Text-driven for weekly, monthly, quarterly, or ad hoc review. Kanban-friendly; uses the same `status_filters` (execution = active work, completed = done).
 
-All manager tools use your existing `config/jira_config.yaml` (e.g. `base_jql`, `status_filters`). For open PRs that may be lingering, run **generate_weekly_status** and review the PR section. Use **test_connections** to verify Jira, GitHub, and GitLab credentials and connectivity before running reports.
+All manager and flow-metrics tools use your existing `config/jira_config.yaml` (e.g. `base_jql`, `status_filters`). For open PRs that may be lingering, run **generate_weekly_status** and review the PR section. Use **test_connections** to verify Jira, GitHub, and GitLab credentials and connectivity before running reports.
 
 ## 👁️ Team health and manager tools
 
-These tools help you keep eyes on team health, spot bottlenecks, and focus on items that need your guidance. They use your Jira config (`config/jira_config.yaml`: `base_jql`, `status_filters`) and optional `config_overrides`; they do not call the team-reports library—they query Jira directly from the MCP server.
+These tools help you keep eyes on team health, spot bottlenecks, and focus on items that need your guidance. They use your Jira config (`config/jira_config.yaml`: `base_jql`, `status_filters`). **get_flow_metrics** delegates to the team-reports library (single source of truth); other manager tools query Jira directly. Optional `config_overrides` apply to the latter; flow metrics use config from file only.
 
 ### get_manager_attention_items
 
@@ -86,12 +88,92 @@ Operator Coach–style brief for team health and execution cadence: what to watc
 - **Customization:** Create `config/manager_coach_brief.txt` to replace the built-in brief with your own.
 - **Example:** `get_manager_coach_brief(include_data_context=True)`
 
+### get_flow_metrics
+
+Flow metrics for team health: cycle time, lead time, throughput, and predictability. Text-driven so you can review weekly, monthly, quarterly, or ad hoc without relying on Jira’s control chart UI. Kanban-friendly; the same metrics are useful for Scrum teams (e.g. for “done” flow).
+
+**Implementation:** This tool delegates to the **team-reports** library (single source of truth). The MCP server does not duplicate flow logic; it calls `team_reports.reports.jira_flow_metrics`. `config_overrides` are not applied when delegating. For long periods or very large boards, run from the CLI: `team-reports jira flow-metrics --quarter N --year Y` or `--days N` (no timeout, same config).
+
+#### What it measures
+
+- **Cycle time** — Time from the first transition into an *execution* status (e.g. In Progress, In Review) to the first transition into a *completed* status (e.g. Closed, Done). This is “time in active work” and aligns with Kanban columns (e.g. To Do → In Progress → In Review → Done). Computed from each issue’s Jira changelog (status history).
+- **Lead time** — Time from issue creation to the first transition into a completed status. If changelog is missing, resolution date is used as the “done” time. Lead time includes backlog wait, so it is typically longer than cycle time.
+- **Throughput** — Number of issues that reached a completed status (and were resolved) within the chosen date range. The tool uses a **count-only Jira request** first, so the number is the true total matching your `base_jql` + completed status + resolution date—not capped by `max_issues`. If there are more completed issues than `max_issues`, cycle/lead stats are computed from the first `max_issues` (by resolution date); the report will say so (e.g. “cycle/lead stats from first 300 issues; increase max_issues for full sample”). **Scope:** Throughput is whatever your `base_jql` matches; if that includes multiple teams or projects, the count will reflect all of them. Tighten `base_jql` in `config/jira_config.yaml` to scope to one team or board (e.g. by board name, project, or label).
+- **Predictability** — Standard deviation and 85th/95th percentiles for both cycle and lead time. A **lower standard deviation** means more consistent delivery; **narrowing percentiles** over time can indicate process improvement. High max or wide percentiles often point to outliers worth investigating.
+
+#### How it works
+
+- The tool runs **two Jira requests**: (1) a **count-only** search (`maxResults=0`) to get the true throughput for the period; (2) a search for up to `max_issues` results **with changelog** (`expand='changelog'`) to compute cycle and lead times. So throughput is never understated by the cap; only the cycle/lead sample may be capped.
+- It fetches each issue with changelog so it can detect the first transition into an execution status and the first into a completed status. Cycle and lead times are derived from those transitions (or from `created` and `resolutiondate` when changelog is insufficient).
+- Status names must match your config: **execution** = active-work columns (e.g. `["In Progress", "Review"]`), **completed** = done columns (e.g. `["Closed"]`). If your board uses different names (e.g. “In Review” vs “Review”), set them in `config/jira_config.yaml` under `status_filters` so cycle time aligns with your board.
+
+#### Choosing a date range
+
+- **`period` presets** — Use `period="last_week"` (7 days), `period="last_month"` (30 days), or `period="last_quarter"` (90 days) for quick, relative ranges from today. Good for weekly standup prep, monthly reviews, or quarterly retrospectives.
+- **Custom range** — Use `start_date` and `end_date` (YYYY-MM-DD) for a specific window (e.g. a calendar month, a quarter, or a sprint boundary). If both are provided, they override `period`.
+- **Default** — If you omit both `period` and dates, the tool uses the last 30 days.
+
+#### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `start_date` | string | Start date YYYY-MM-DD. Omit if using `period`. |
+| `end_date` | string | End date YYYY-MM-DD. Omit if using `period`. |
+| `period` | string | One of `last_week`, `last_month`, `last_quarter`. Ignored when `start_date` and `end_date` are set. |
+| `max_issues` | integer | Maximum number of issues to fetch with changelog for cycle/lead stats (default 300). Throughput is always the full count; this only caps the sample used for cycle/lead. |
+| `config_overrides` | object | Not applied when delegating to team-reports; config is read from `config/jira_config.yaml` only. |
+| `save_report` | boolean | If true, save the report to `Reports/Flow_Metrics_{start}_to_{end}.md`. Default: false (output only in chat). |
+
+#### Examples
+
+```text
+# Last 30 days (default)
+get_flow_metrics()
+
+# Preset ranges
+get_flow_metrics(period="last_week")
+get_flow_metrics(period="last_month")
+get_flow_metrics(period="last_quarter")
+
+# Custom date range (e.g. January 2026)
+get_flow_metrics(start_date="2026-01-01", end_date="2026-01-31")
+
+# Longer period with more issues
+get_flow_metrics(period="last_quarter", max_issues=500)
+
+# Save report to disk (Reports/Flow_Metrics_*.md)
+get_flow_metrics(period="last_month", save_report=True)
+```
+
+#### Output
+
+By default the report is **returned in chat only** (not written to disk). Use `save_report=True` to write it to `Reports/Flow_Metrics_{start}_to_{end}.md`.
+
+Report contents:
+
+- **Period** — The start and end date used.
+- **Throughput** — True total issues completed in that period (from a count-only query). If the total exceeds `max_issues`, a note indicates that cycle/lead stats are from the first N issues.
+- **Cycle time** — Average, median, min, max, standard deviation, 85th and 95th percentiles (and count of issues with computable cycle time).
+- **Lead time** — Same statistics for lead time.
+- Notes on scope (`base_jql`) and config (`status_filters`).
+
+#### Config requirement
+
+Ensure `config/jira_config.yaml` has:
+
+- **`base_jql`** — Restricts to the board/project/team you care about (e.g. `project = DISCO AND board = "Discovery Main Board"`).
+- **`status_filters.execution`** — Statuses that count as “active work” for cycle time (e.g. `["In Progress", "In Review"]`). Must match your board’s column names exactly.
+- **`status_filters.completed`** — Statuses that count as “done” (e.g. `["Closed"]` or `["Done", "Closed"]`).
+
+If cycle time shows “No cycle time data,” check that your board’s status names match these lists and that issues have transition history (changelog) in Jira.
+
 ### Suggested workflow
 
-1. Run **get_lingering_items** and **get_bottlenecks_and_priorities** to see where work is stuck and where WIP is concentrated.
-2. Run **get_manager_attention_items** to see concrete tickets that need your guidance (unassigned, stuck in refinement/review, or high-priority in progress).
-3. Run **get_manager_coach_brief** to align your actions with the Operator Coach perspective and weekly cadence.
-4. For PR/MR context (e.g. open PRs that may be lingering), run **generate_weekly_status** and review the PR section.
+1. Run **get_flow_metrics** (e.g. `period="last_month"`) for a baseline on cycle time, lead time, throughput, and predictability.
+2. Run **get_lingering_items** and **get_bottlenecks_and_priorities** to see where work is stuck and where WIP is concentrated.
+3. Run **get_manager_attention_items** to see concrete tickets that need your guidance (unassigned, stuck in refinement/review, or high-priority in progress).
+4. Run **get_manager_coach_brief** to align your actions with the Operator Coach perspective and weekly cadence.
+5. For PR/MR context (e.g. open PRs that may be lingering), run **generate_weekly_status** and review the PR section.
 
 ## 🚀 Quick Start (5 minutes)
 
