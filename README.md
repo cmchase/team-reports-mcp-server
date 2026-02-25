@@ -4,7 +4,7 @@ A clean and focused Model Context Protocol (MCP) server that provides seamless i
 
 ## 🎯 Features
 
-- **12 Comprehensive Tools** for full Jira interaction
+- **16 Comprehensive Tools** for full Jira interaction and manager workflows
 - **Weekly Team Reports** - Automated Jira + GitHub status reports with auto-generated AI executive summaries
 - **Natural Language Interface** - Ask AI to manage your Jira work
 - **Real-time Updates** - Get current project status and issue information
@@ -29,6 +29,69 @@ A clean and focused Model Context Protocol (MCP) server that provides seamless i
 | `get_my_issues` | Get assigned issues | `get_my_issues(max_results=20)` |
 | `get_project_issues` | Get project issues | `get_project_issues(project_key="PROJ")` |
 | `generate_weekly_status` | Generate weekly report | `generate_weekly_status(github_token="ghp_...")` |
+| `get_manager_attention_items` | Items needing your guidance (unassigned, stuck in Refinement/Review, high priority) | `get_manager_attention_items(days_in_review=5)` |
+| `get_lingering_items` | Tickets lingering in progress/review | `get_lingering_items(days_lingering=7)` |
+| `get_bottlenecks_and_priorities` | WIP by status + high-priority in progress | `get_bottlenecks_and_priorities()` |
+| `get_manager_coach_brief` | Operator Coach: what to watch for team health and execution | `get_manager_coach_brief()` |
+| `test_connections` | Test Jira, GitHub, and GitLab connectivity and credentials | `test_connections()` or `test_connections(connections=["jira", "github"])` |
+
+### Manager workflow (busy engineering managers)
+
+Use these tools to focus on items that need your guidance, spot bottlenecks, and align with coach feedback:
+
+1. **get_manager_attention_items** — Unassigned tickets, items stuck in Refinement or Review, and high-priority in-progress work. Tune with `days_in_refinement`, `days_in_review`, and `include_unassigned`.
+2. **get_lingering_items** — Tickets in progress or review for longer than `days_lingering` (default 7). Surfaces stalled work and review bottlenecks.
+3. **get_bottlenecks_and_priorities** — WIP counts by status and a list of Critical/Blocker items in progress. Use to prioritize where to unblock.
+4. **get_manager_coach_brief** — Operator Coach perspective: what to watch for team health and execution cadence, weekly cadence checklist, and tactical prompts. Optional: add `config/manager_coach_brief.txt` to customize the brief.
+
+All manager tools use your existing `config/jira_config.yaml` (e.g. `base_jql`, `status_filters`). For open PRs that may be lingering, run **generate_weekly_status** and review the PR section. Use **test_connections** to verify Jira, GitHub, and GitLab credentials and connectivity before running reports.
+
+## 👁️ Team health and manager tools
+
+These tools help you keep eyes on team health, spot bottlenecks, and focus on items that need your guidance. They use your Jira config (`config/jira_config.yaml`: `base_jql`, `status_filters`) and optional `config_overrides`; they do not call the team-reports library—they query Jira directly from the MCP server.
+
+### get_manager_attention_items
+
+Surfaces items that likely need your guidance or feedback.
+
+- **What it finds:** Unassigned tickets; tickets stuck in Refinement (or similar) for N days; tickets stuck in Review (or similar) for N days; Critical/Blocker items in progress or review.
+- **Parameters:** `days_in_refinement` (default 3), `days_in_review` (default 5), `include_unassigned` (default true), `max_results` (default 30), `config_overrides` (optional).
+- **Example:** `get_manager_attention_items(days_in_review=5, days_in_refinement=3)`
+- **Output:** List of issues with key, summary, status, assignee, priority, last updated, and URL.
+
+### get_lingering_items
+
+Highlights work that has been in the same execution state (e.g. In Progress, Review) for too long—useful for spotting stalled work and review bottlenecks.
+
+- **What it finds:** Tickets in your configured “execution” statuses (e.g. In Progress, Review) that haven’t been updated for at least `days_lingering` days, ordered by oldest first.
+- **Parameters:** `days_lingering` (default 7), `max_results` (default 50), `config_overrides` (optional).
+- **Example:** `get_lingering_items(days_lingering=7)`
+- **Output:** List of lingering tickets; includes a note to run **generate_weekly_status** for open PRs/MRs that may be lingering.
+
+### get_bottlenecks_and_priorities
+
+Quick view of WIP distribution and high-priority execution work.
+
+- **What it shows:** Counts of issues by status (planned + execution from your config), then a list of Critical/Blocker items in progress or review.
+- **Parameters:** `max_results` (default 20, for the high-priority list), `config_overrides` (optional).
+- **Example:** `get_bottlenecks_and_priorities()`
+- **Output:** “WIP by status” counts, then high-priority in-progress/review items; ends with a short suggested-focus line.
+
+### get_manager_coach_brief
+
+Operator Coach–style brief for team health and execution cadence: what to watch, weekly cadence checklist, and tactical prompts.
+
+- **Content:** What to watch (review latency, WIP depth, unassigned/refinement, priority alignment); weekly cadence (e.g. top 3 outcomes, 1 decision needed, 1 risk, 1 experiment); tactical prompts when things feel stuck; rules of engagement.
+- **Parameters:** `include_data_context` (default true)—when true, adds a tip to run **get_lingering_items** and **get_bottlenecks_and_priorities** first.
+- **Customization:** Create `config/manager_coach_brief.txt` to replace the built-in brief with your own.
+- **Example:** `get_manager_coach_brief(include_data_context=True)`
+
+### Suggested workflow
+
+1. Run **get_lingering_items** and **get_bottlenecks_and_priorities** to see where work is stuck and where WIP is concentrated.
+2. Run **get_manager_attention_items** to see concrete tickets that need your guidance (unassigned, stuck in refinement/review, or high-priority in progress).
+3. Run **get_manager_coach_brief** to align your actions with the Operator Coach perspective and weekly cadence.
+4. For PR/MR context (e.g. open PRs that may be lingering), run **generate_weekly_status** and review the PR section.
 
 ## 🚀 Quick Start (5 minutes)
 
