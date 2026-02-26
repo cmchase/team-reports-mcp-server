@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../team-reports"
+		},
+		{
+			"path": "../team-compass"
 		}
 	],
 	"settings": {}
