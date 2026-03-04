@@ -1,0 +1,32 @@
+# GitLab Configuration
+# Used by weekly/quarterly GitLab reports and MCP generate_weekly_status. Set GITLAB_TOKEN in .env.
+
+# Base URL for GitLab API (use for self-hosted instances)
+base_url: "https://gitlab.cee.redhat.com"
+
+# List of projects to analyze (path with namespace, e.g. group/subgroup/project)
+projects:
+  - "discovery/unofficial-internal-documentation"
+
+# Report settings
+report_settings:
+  max_results: 100
+  include_private: true
+  track_merge_requests: true
+  track_commits: true
+  track_issues: true
+  timezone: "UTC"
+  max_contributors_in_overview: 15
+  max_recent_items_per_contributor: 10
+
+# API settings (verify_ssl: false for self-hosted with self-signed certs)
+api_settings:
+  rate_limit_buffer: 100
+  timeout: 30
+  max_retries: 3
+  retry_delay: 1
+  verify_ssl: false
+
+# Contributor filters
+contributor_filters:
+  exclude_bots: true

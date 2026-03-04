@@ -147,8 +147,8 @@ def load_config_with_overrides(config_overrides: Optional[Dict[str, Any]] = None
         'team': {}
     }
     
-    # Try to load config files
-    config_dir = Path("config")
+    # Config dir is next to this script so it's correct regardless of process cwd (e.g. when MCP runs from another workspace)
+    config_dir = Path(__file__).resolve().parent / "config"
     
     # Load Jira config
     jira_config_path = config_dir / "jira_config.yaml"

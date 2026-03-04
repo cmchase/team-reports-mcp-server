@@ -1,0 +1,33 @@
+---
+description: When user asks for Monday manager check, monthly flow metrics, or Tuesday weekly status, run the corresponding MCP tools in order.
+alwaysApply: true
+---
+
+# Manager cadence prompts
+
+When the user asks for one of these cadences, run the **user-team-reports-mcp-server** tools as below. Use default parameters unless they specify otherwise.
+
+## Monday manager check
+
+Trigger phrases: "Monday manager check", "run my Monday manager check", "do my Monday cadence", "manager check".
+
+1. **get_lingering_items** (defaults: days_lingering 7, max_results 50)
+2. **get_bottlenecks_and_priorities** (default max_results 20)
+3. **get_manager_attention_items** (defaults: days_in_refinement 3, days_in_review 5, include_unassigned true, max_results 30)
+4. **get_manager_coach_brief** (include_data_context true)
+
+Present the outputs in order so they can act on attention items and coach guidance.
+
+## Monthly flow metrics (first work day of month)
+
+Trigger phrases: "monthly flow metrics", "run my monthly flow metrics", "flow metrics for the month".
+
+- Call **get_flow_metrics** with `period: "last_month"` and `save_report: true` so the report is written to `Reports/Flow_Metrics_{start}_to_{end}.md`.
+- Confirm where the report was saved and summarize the main numbers.
+
+## Tuesday weekly status
+
+Trigger phrases: "Tuesday weekly status", "run my Tuesday weekly status", "weekly status", "generate weekly report".
+
+- Call **generate_weekly_status** with default dates (the week that just ended).
+- After it completes, provide or point them to the prompt for creating the executive summary (from config/executive_summary_prompt.txt or the default).
