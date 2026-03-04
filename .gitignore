@@ -79,4 +79,5 @@ Reports/
 config/executive_summary_prompt.txt
 config/jira_config.yaml
 config/github_config.yaml
+config/gitlab_config.yaml
 config/team_config.yaml
