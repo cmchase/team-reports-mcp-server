@@ -34,6 +34,7 @@ A clean and focused Model Context Protocol (MCP) server that provides seamless i
 | `get_bottlenecks_and_priorities` | WIP by status + high-priority in progress | `get_bottlenecks_and_priorities()` |
 | `get_manager_coach_brief` | Operator Coach: what to watch for team health and execution | `get_manager_coach_brief()` |
 | `get_flow_metrics` | Cycle time, lead time, throughput, predictability over a date range (Kanban-friendly) | `get_flow_metrics(period="last_month")` or `get_flow_metrics(start_date="2026-01-01", end_date="2026-01-31")` |
+| `get_sizing_analysis` | Time-to-completion by size (story points) over a date range; repeatable (e.g. 9 months); optionally save baseline; works for any team (kanban, scrum) | `get_sizing_analysis(period_days=270)` or `get_sizing_analysis(start_date="2025-06-01", end_date="2026-03-01", save_report=True)` |
 | `test_connections` | Test Jira, GitHub, and GitLab connectivity and credentials | `test_connections()` or `test_connections(connections=["jira", "github"])` |
 
 ### Manager workflow (busy engineering managers)
@@ -45,8 +46,9 @@ Use these tools to focus on items that need your guidance, spot bottlenecks, and
 3. **get_bottlenecks_and_priorities** — WIP counts by status and a list of Critical/Blocker items in progress. Use to prioritize where to unblock.
 4. **get_manager_coach_brief** — Operator Coach perspective: what to watch for team health and execution cadence, weekly cadence checklist, and tactical prompts. Optional: add `config/manager_coach_brief.txt` to customize the brief.
 5. **get_flow_metrics** — Cycle time, lead time, throughput, and predictability (std dev, percentiles) over a date range. Text-driven for weekly, monthly, quarterly, or ad hoc review. Kanban-friendly; uses the same `status_filters` (execution = active work, completed = done).
+6. **get_sizing_analysis** — Time-to-completion by size (story points) over a window (e.g. 9 months). Run periodically to establish a baseline; flow metrics then flag *possibly mis-sized* items when cycle time far exceeds the median for that size. Usable by kanban, scrum, or any team using story points.
 
-All manager and flow-metrics tools use your existing `config/jira_config.yaml` (e.g. `base_jql`, `status_filters`). For open PRs that may be lingering, run **generate_weekly_status** and review the PR section. Use **test_connections** to verify Jira, GitHub, and GitLab credentials and connectivity before running reports.
+All manager and flow-metrics tools use your existing `config/jira_config.yaml` (e.g. `base_jql`, `status_filters`). For t-shirt sizing and “possibly mis-sized” callouts, set `flow_metrics.story_points_field` and keep `team_sizing` (e.g. xsmall: 1, small: 3, medium: 9, large: 27, xlarge: 81). For open PRs that may be lingering, run **generate_weekly_status** and review the PR section. Use **test_connections** to verify Jira, GitHub, and GitLab credentials and connectivity before running reports.
 
 ## 👁️ Team health and manager tools
 
@@ -167,6 +169,8 @@ Ensure `config/jira_config.yaml` has:
 
 If cycle time shows “No cycle time data,” check that your board’s status names match these lists and that issues have transition history (changelog) in Jira.
 
+When **flow_metrics.story_points_field** is set, the flow report includes **Cycle by size (story points)** and **Possibly mis-sized**. Optional **team_sizing** maps points to labels (e.g. t-shirt names); without it, raw point values are used. Use **get_sizing_analysis** (e.g. `period_days=270`) for a repeatable view by size; optionally `save_report` and `save_baseline`.
+
 ### Suggested workflow
 
 1. Run **get_flow_metrics** (e.g. `period="last_month"`) for a baseline on cycle time, lead time, throughput, and predictability.
@@ -215,18 +219,17 @@ pip install -r requirements.txt
 
 ### 2. Configure Credentials
 
-Create a `.env` file with your Jira details:
+Copy `env.template` to `.env` and set your Jira (and optional GitHub/GitLab) values:
 
 ```bash
-JIRA_SERVER=https://your-company.atlassian.net
-JIRA_EMAIL=your-email@company.com
-JIRA_API_TOKEN=your-api-token
+cp env.template .env
+# Edit .env: set JIRA_SERVER, JIRA_EMAIL, JIRA_API_TOKEN (and GITHUB_TOKEN, GITLAB_TOKEN if needed)
 ```
 
-**Getting Your API Token:**
-1. Go to https://id.atlassian.com/manage-profile/security/api-tokens
-2. Click "Create API token"
-3. Copy the token to your `.env` file
+**Getting Your API Token:**  
+Create a token at [Atlassian API tokens](https://id.atlassian.com/manage-profile/security/api-tokens) and paste it into `JIRA_API_TOKEN` in `.env`. After migrating to a new Jira instance, create a new token for that instance and update `.env`.
+
+**Single source of truth:** Prefer storing credentials only in `.env`. You can omit the `env` block in your MCP config (see step 4) so the server loads from the repo’s `.env` when it starts—one place to update when URLs or tokens change.
 
 ### 3. Test Connection
 
@@ -239,22 +242,18 @@ python3 test_connection.py
 ### 4. Configure MCP Client
 
 #### For Cursor:
-Add to `~/.cursor/mcp.json`:
+Add to `~/.cursor/mcp.json` (or Cursor Settings → MCP). Use the full path to your `team-reports-mcp-server` repo.
 
-**With Virtual Environment (Recommended):**
+**Recommended: use `.env` only (no credentials in MCP config).** The server loads from the repo’s `.env` when started with the repo as working directory:
+
+**With Virtual Environment:**
 ```json
 {
   "mcpServers": {
     "team-reports": {
       "type": "stdio",
       "command": "/full/path/to/team-reports-mcp-server/venv/bin/python3",
-      "args": ["/full/path/to/team-reports-mcp-server/server.py"],
-      "env": {
-        "JIRA_SERVER": "https://your-company.atlassian.net",
-        "JIRA_EMAIL": "your-email@company.com",
-        "JIRA_API_TOKEN": "your-api-token",
-        "GITHUB_TOKEN": "your-github-token"
-      }
+      "args": ["/full/path/to/team-reports-mcp-server/server.py"]
     }
   }
 }
@@ -267,35 +266,25 @@ Add to `~/.cursor/mcp.json`:
     "team-reports": {
       "type": "stdio",
       "command": "python3",
-      "args": ["/full/path/to/team-reports-mcp-server/server.py"],
-      "env": {
-        "JIRA_SERVER": "https://your-company.atlassian.net",
-        "JIRA_EMAIL": "your-email@company.com",
-        "JIRA_API_TOKEN": "your-api-token",
-        "GITHUB_TOKEN": "your-github-token"
-      }
+      "args": ["/full/path/to/team-reports-mcp-server/server.py"]
     }
   }
 }
 ```
+
+Optional: if you prefer to pass credentials in the MCP config instead of `.env`, add an `"env"` block with `JIRA_SERVER`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, and optionally `GITHUB_TOKEN`/`GITLAB_TOKEN`. Keeping credentials only in `.env` is easier to maintain (e.g. after a Jira instance migration).
 
 #### For VS Code:
-Add to your VS Code MCP configuration:
+Add to your VS Code MCP configuration. Prefer no `env` block so the server uses the repo’s `.env`:
 
-**With Virtual Environment (Recommended):**
+**With Virtual Environment:**
 ```json
 {
   "mcpServers": {
     "team-reports": {
       "type": "stdio",
       "command": "/full/path/to/team-reports-mcp-server/venv/bin/python3",
-      "args": ["/full/path/to/team-reports-mcp-server/server.py"],
-      "env": {
-        "JIRA_SERVER": "https://your-company.atlassian.net",
-        "JIRA_EMAIL": "your-email@company.com",
-        "JIRA_API_TOKEN": "your-api-token",
-        "GITHUB_TOKEN": "your-github-token"
-      }
+      "args": ["/full/path/to/team-reports-mcp-server/server.py"]
     }
   }
 }
@@ -308,13 +297,7 @@ Add to your VS Code MCP configuration:
     "team-reports": {
       "type": "stdio",
       "command": "python3",
-      "args": ["/full/path/to/team-reports-mcp-server/server.py"],
-      "env": {
-        "JIRA_SERVER": "https://your-company.atlassian.net",
-        "JIRA_EMAIL": "your-email@company.com",
-        "JIRA_API_TOKEN": "your-api-token",
-        "GITHUB_TOKEN": "your-github-token"
-      }
+      "args": ["/full/path/to/team-reports-mcp-server/server.py"]
     }
   }
 }

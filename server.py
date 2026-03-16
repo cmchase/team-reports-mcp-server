@@ -282,6 +282,22 @@ def get_flow_metrics_report_path(start_date: str, end_date: str) -> Path:
     return reports_dir / f"Flow_Metrics_{start_date}_to_{end_date}.md"
 
 
+def get_sizing_report_path(start_date: str, end_date: str) -> Path:
+    """Path for a saved sizing analysis report (Reports/Sizing_Analysis_{start}_to_{end}.md)."""
+    server_dir = Path(__file__).parent.absolute()
+    reports_dir = server_dir / "Reports"
+    reports_dir.mkdir(exist_ok=True)
+    return reports_dir / f"Sizing_Analysis_{start_date}_to_{end_date}.md"
+
+
+def get_sizing_baseline_path(start_date: str, end_date: str) -> Path:
+    """Path for a saved sizing baseline JSON (Reports/Sizing_Baseline_{start}_to_{end}.json)."""
+    server_dir = Path(__file__).parent.absolute()
+    reports_dir = server_dir / "Reports"
+    reports_dir.mkdir(exist_ok=True)
+    return reports_dir / f"Sizing_Baseline_{start_date}_to_{end_date}.json"
+
+
 def check_report_exists(start_date: str, end_date: str) -> Optional[str]:
     """
     Check if a report already exists for the given date range.
@@ -486,7 +502,7 @@ class JiraMCPServer:
                 ),
                 Tool(
                     name="update_issue",
-                    description="Update an existing Jira issue",
+                    description="Update an existing Jira issue (summary, description, and/or fix version)",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -501,6 +517,10 @@ class JiraMCPServer:
                             "description": {
                                 "type": "string",
                                 "description": "New description (optional)"
+                            },
+                            "fix_version": {
+                                "type": "string",
+                                "description": "Fix Version/s: set the release version for this issue (e.g. '2.4.4', 'pre-2026-release-baseline'). Must exist as a version in the project."
                             }
                         },
                         "required": ["issue_key"]
@@ -800,6 +820,22 @@ class JiraMCPServer:
                     }
                 ),
                 Tool(
+                    name="get_sizing_analysis",
+                    description="Sizing analysis: time-to-completion by size (story points) over a date range. Works for any team (kanban, scrum). Optional team_sizing maps points to labels. Repeatable (e.g. 9 months). Optionally save report and/or JSON baseline.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD. Omit if using period_days."},
+                            "end_date": {"type": "string", "description": "End date YYYY-MM-DD. Omit if using period_days."},
+                            "period_days": {"type": "integer", "description": "Analysis window in days ending today (e.g. 270 for ~9 months). Default: 270.", "default": 270},
+                            "max_issues": {"type": "integer", "description": "Max issues to fetch. Default: 500.", "default": 500},
+                            "save_report": {"type": "boolean", "description": "Save markdown to Reports/Sizing_Analysis_*.md.", "default": False},
+                            "save_baseline": {"type": "boolean", "description": "Save JSON baseline to Reports/Sizing_Baseline_*.json.", "default": False}
+                        },
+                        "required": []
+                    }
+                ),
+                Tool(
                     name="test_connections",
                     description="Test connectivity and credentials for Jira, GitHub, and/or GitLab. Runs a minimal API call per instance. Use to verify env vars and config before running reports or Jira tools.",
                     inputSchema={
@@ -847,7 +883,8 @@ class JiraMCPServer:
                     return await self._update_issue(
                         arguments["issue_key"],
                         arguments.get("summary"),
-                        arguments.get("description")
+                        arguments.get("description"),
+                        arguments.get("fix_version")
                     )
                 elif name == "add_comment":
                     return await self._add_comment(
@@ -917,6 +954,15 @@ class JiraMCPServer:
                         arguments.get("max_issues", 100),
                         arguments.get("config_overrides"),
                         arguments.get("save_report", False)
+                    )
+                elif name == "get_sizing_analysis":
+                    return await self._get_sizing_analysis(
+                        arguments.get("start_date"),
+                        arguments.get("end_date"),
+                        arguments.get("period_days", 270),
+                        arguments.get("max_issues", 500),
+                        arguments.get("save_report", False),
+                        arguments.get("save_baseline", False)
                     )
                 else:
                     return [TextContent(type="text", text=f"Unknown tool: {name}")]
@@ -1047,35 +1093,41 @@ class JiraMCPServer:
         except Exception as e:
             return [TextContent(type="text", text=f"Error creating issue: {str(e)}")]
 
-    async def _update_issue(self, issue_key: str, summary: Optional[str] = None, 
-                          description: Optional[str] = None) -> List[TextContent]:
-        """Update an existing issue"""
+    async def _update_issue(self, issue_key: str, summary: Optional[str] = None,
+                          description: Optional[str] = None,
+                          fix_version: Optional[str] = None) -> List[TextContent]:
+        """Update an existing issue (summary, description, and/or fix version)."""
         try:
             issue = self.jira_client.issue(issue_key)
             update_dict = {}
-            
+
             if summary:
-                update_dict['summary'] = summary
+                update_dict["summary"] = summary
             if description:
-                update_dict['description'] = description
-                
+                update_dict["description"] = description
+            if fix_version:
+                # Jira REST API expects fixVersions as list of { "name": "version name" }
+                update_dict["fixVersions"] = [{"name": fix_version}]
+
             if not update_dict:
                 return [TextContent(type="text", text="No fields specified for update.")]
-            
+
             issue.update(fields=update_dict)
-            
+
             updates = []
             if summary:
                 updates.append(f"Summary: {summary}")
             if description:
                 updates.append("Description updated")
-                
+            if fix_version:
+                updates.append(f"Fix version: {fix_version}")
+
             text = (f"**Issue {issue_key} updated successfully!**\n\n"
                    f"**Updated fields:** {', '.join(updates)}\n"
                    f"**URL:** {self.jira_client.server_url}/browse/{issue_key}")
-            
+
             return [TextContent(type="text", text=text)]
-            
+
         except Exception as e:
             return [TextContent(type="text", text=f"Error updating issue {issue_key}: {str(e)}")]
 
@@ -1506,6 +1558,90 @@ class JiraMCPServer:
             )]
         except Exception as e:
             logger.error("Error in get_flow_metrics: %s", e)
+            return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+    async def _get_sizing_analysis(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        period_days: int = 270,
+        max_issues: int = 500,
+        save_report: bool = False,
+        save_baseline: bool = False,
+    ) -> List[TextContent]:
+        """
+        Sizing analysis: time-to-completion by size (story points) over a date range.
+        Delegates to team-reports SizingAnalysisReport. Requires flow_metrics.story_points_field;
+        optional team_sizing maps points to size labels. Usable by any team type.
+        """
+        try:
+            from team_reports.reports.sizing_analysis import SizingAnalysisReport
+            from team_reports.utils.date import get_date_range_for_days
+
+            if start_date and end_date:
+                try:
+                    datetime.strptime(start_date, "%Y-%m-%d")
+                    datetime.strptime(end_date, "%Y-%m-%d")
+                    calc_start, calc_end = start_date, end_date
+                except ValueError as e:
+                    return [TextContent(type="text", text=f"Invalid dates: {e}. Use YYYY-MM-DD.")]
+            else:
+                calc_start, calc_end = get_date_range_for_days(period_days)
+
+            server_dir = Path(__file__).resolve().parent
+            config_file = str(server_dir / "config" / "jira_config.yaml")
+            baseline_path: Optional[str] = None
+            if save_baseline:
+                baseline_path = str(get_sizing_baseline_path(calc_start, calc_end))
+
+            def _run_sizing_sync() -> str:
+                report = SizingAnalysisReport(
+                    config_file=config_file,
+                    jira_server=os.getenv("JIRA_SERVER"),
+                    jira_email=os.getenv("JIRA_EMAIL"),
+                    jira_token=os.getenv("JIRA_API_TOKEN"),
+                )
+                report.initialize()
+                return report.generate_report(
+                    calc_start, calc_end, max_issues=max_issues, save_baseline_path=baseline_path
+                )
+
+            logger.info("Sizing analysis: delegating to team-reports (%s to %s)...", calc_start, calc_end)
+            loop = asyncio.get_event_loop()
+            report_text = await asyncio.wait_for(
+                loop.run_in_executor(None, _run_sizing_sync),
+                timeout=600,
+            )
+
+            if save_report:
+                def _write_sync() -> Tuple[Optional[Path], Optional[str]]:
+                    try:
+                        path = get_sizing_report_path(calc_start, calc_end)
+                        path.write_text(report_text, encoding="utf-8")
+                        return (path, None)
+                    except Exception as e:
+                        return (None, str(e))
+                try:
+                    sizing_path, save_err = await asyncio.wait_for(
+                        loop.run_in_executor(None, _write_sync),
+                        timeout=15.0,
+                    )
+                    if save_err:
+                        report_text += f"\n\n*Could not save report: {save_err}*"
+                    else:
+                        report_text += f"\n\n**Report saved to:** `{sizing_path}`"
+                except asyncio.TimeoutError:
+                    report_text += "\n\n*Save timed out (report is still shown above).*"
+
+            return [TextContent(type="text", text=report_text)]
+        except ImportError as e:
+            logger.error("team-reports not available for sizing analysis: %s", e)
+            return [TextContent(
+                type="text",
+                text="Sizing analysis requires the team-reports package. Install it or run from CLI: team-reports jira sizing-analysis.",
+            )]
+        except Exception as e:
+            logger.error("Error in get_sizing_analysis: %s", e)
             return [TextContent(type="text", text=f"Error: {str(e)}")]
 
     async def _test_connections(
